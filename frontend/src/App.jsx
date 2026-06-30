@@ -135,7 +135,7 @@ function AppRoutes() {
 function App() {
   return (
     <Provider store={store}>
-      <BrowserRouter>
+      <BrowserRouter basename="/admin-panel">
         <AppRoutes />
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
       </BrowserRouter>

@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+const LOGIN_PATH = `${import.meta.env.BASE_URL}login`.replace(/\/{2,}/g, '/');
 
 const api = axios.create({
   baseURL: API_URL,
@@ -43,7 +44,7 @@ api.interceptors.response.use(
       if (isAuthEndpoint(originalRequest.url)) {
         localStorage.removeItem('accessToken');
         if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
+          window.location.href = LOGIN_PATH;
         }
         return Promise.reject(error);
       }
@@ -71,7 +72,7 @@ api.interceptors.response.use(
         if (refreshError.response?.status === 401) {
           localStorage.removeItem('accessToken');
           if (!window.location.pathname.includes('/login')) {
-            window.location.href = '/login';
+            window.location.href = LOGIN_PATH;
           }
         }
         return Promise.reject(refreshError);
