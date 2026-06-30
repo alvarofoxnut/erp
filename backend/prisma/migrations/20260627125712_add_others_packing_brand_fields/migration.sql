@@ -1,0 +1,10 @@
+-- AlterTable
+ALTER TABLE "Brand" ADD COLUMN     "packagingPrice" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "packingWeightGrams" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "proportionOthers" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "FinishedProduction" ADD COLUMN     "consumedOthers" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "PackagingTransaction" ADD COLUMN     "consumedOthers" DOUBLE PRECISION NOT NULL DEFAULT 0;

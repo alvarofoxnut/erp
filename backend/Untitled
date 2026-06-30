@@ -1,0 +1,6 @@
+cd backend
+npm run db:dev:stop
+Remove-Item -Recurse -Force .dev-postgres\data
+npm run db:dev:init
+npm run db:migrate
+npm run seed

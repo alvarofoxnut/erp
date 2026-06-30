@@ -1,0 +1,725 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+enum PartyType {
+  vendor
+  customer
+  both
+}
+
+enum StockCategory {
+  raw_material
+  wip
+  quality_6no
+  quality_5no
+  quality_4_5no
+  quality_4no
+  quality_others
+  finished_goods
+  branded_goods
+  trading
+}
+
+enum ManufacturingSaleType {
+  loose
+  branded
+}
+
+enum StockMovementType {
+  purchase
+  production
+  consumption
+  sales
+  returns
+  transfer
+  damage
+}
+
+enum StockDirection {
+  in
+  out
+}
+
+enum ExpenseType {
+  direct
+  indirect
+  personal
+}
+
+enum ExpensePaymentMode {
+  cash
+  bank
+  other
+}
+
+enum LedgerType {
+  cash
+  bank
+  vendor
+  customer
+  sales
+  purchases
+  expenses
+}
+
+enum ProductionMode {
+  manual
+  proportionate
+}
+
+enum PaymentStatus {
+  paid
+  partial
+  unpaid
+}
+
+enum InvoicePaymentMode {
+  cash
+  bank
+  upi
+  cheque
+  credit
+}
+
+enum InvoiceType {
+  customer
+  vendor
+}
+
+enum BusinessUnit {
+  manufacturing
+  trading
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  password     String
+  role         String    @default("operator")
+  permissions  String[]  @default([])
+  isActive     Boolean   @default(true)
+  refreshToken String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  rolesCreated              Role[]                 @relation("RoleCreatedBy")
+  itemsCreated              Item[]                 @relation("ItemCreatedBy")
+  partiesCreated            Party[]                @relation("PartyCreatedBy")
+  purchasesCreated          Purchase[]             @relation("PurchaseCreatedBy")
+  salesCreated              Sale[]                 @relation("SaleCreatedBy")
+  stockLedgersCreated       StockLedger[]          @relation("StockLedgerCreatedBy")
+  ledgerEntriesCreated      LedgerEntry[]          @relation("LedgerEntryCreatedBy")
+  expensesCreated           Expense[]              @relation("ExpenseCreatedBy")
+  invoicesCreated           Invoice[]              @relation("InvoiceCreatedBy")
+  auditLogs                 AuditLog[]
+  manufacturingVendorsCreated ManufacturingVendor[] @relation("MfgVendorCreatedBy")
+  rawPurchasesCreated       RawPurchase[]          @relation("RawPurchaseCreatedBy")
+  machineEntriesCreated     MachineEntry[]         @relation("MachineEntryCreatedBy")
+  qualityProductionsCreated QualityProduction[]    @relation("QualityProductionCreatedBy")
+  finishedProductionsCreated FinishedProduction[]  @relation("FinishedProductionCreatedBy")
+  manufacturingSalesCreated ManufacturingSale[]    @relation("MfgSaleCreatedBy")
+  manufacturingDamagesCreated ManufacturingDamage[] @relation("MfgDamageCreatedBy")
+  tradingDamagesCreated     TradingDamage[]          @relation("TradingDamageCreatedBy")
+  brandsCreated             Brand[]                  @relation("BrandCreatedBy")
+  packagingTransactionsCreated PackagingTransaction[] @relation("PackagingCreatedBy")
+  inventoryAuditLogs        InventoryAuditLog[]
+
+  @@index([role])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  permissions String[] @default([])
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdBy   User?    @relation("RoleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+}
+
+model Item {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  sku         String?  @unique
+  unit        String   @default("KG")
+  description String?
+  category    String   @default("trading")
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdBy   User?    @relation("ItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  partyLinks  PartySuppliedItem[]
+  purchases   Purchase[]
+  sales       Sale[]
+  stockLedgers StockLedger[]
+  tradingDamageLines TradingDamageLine[]
+
+  @@index([name])
+}
+
+model Party {
+  id             String    @id @default(cuid())
+  name           String
+  type           PartyType
+  contactPerson  String?
+  phone          String?
+  email          String?
+  address        String?
+  gstNumber      String?
+  openingBalance Float     @default(0)
+  isActive       Boolean   @default(true)
+  createdById    String?
+  createdBy      User?     @relation("PartyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  suppliedItems PartySuppliedItem[]
+  purchases     Purchase[]
+  ledgers       Ledger[]
+  invoices      Invoice[]
+
+  @@index([name])
+  @@index([type])
+}
+
+model PartySuppliedItem {
+  partyId String
+  itemId  String
+  party   Party  @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  item    Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([partyId, itemId])
+}
+
+model Purchase {
+  id           String   @id @default(cuid())
+  serialNumber String   @unique
+  date         DateTime
+  partyId      String
+  itemId       String
+  quantity     Float
+  rate         Float    @default(0)
+  amount       Float
+  createdById  String?
+  createdBy    User?    @relation("PurchaseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id])
+  item  Item  @relation(fields: [itemId], references: [id])
+  invoice Invoice?
+
+  @@index([date])
+  @@index([partyId, date])
+  @@index([itemId, date])
+}
+
+model Sale {
+  id                 String   @id @default(cuid())
+  serialNumber       String   @unique
+  date               DateTime
+  customerName       String
+  customerPhone      String?
+  customerEmail      String?
+  customerAddress    String?
+  customerGstNumber  String?
+  itemId             String
+  quantity           Float
+  rate               Float    @default(0)
+  amount             Float
+  createdById        String?
+  createdBy          User?    @relation("SaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  item    Item     @relation(fields: [itemId], references: [id])
+  invoice Invoice?
+
+  @@index([date])
+  @@index([customerName, date])
+  @@index([itemId, date])
+}
+
+model ManufacturingVendor {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  gstNumber     String?
+  isActive      Boolean  @default(true)
+  createdById   String?
+  createdBy     User?    @relation("MfgVendorCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rawPurchases RawPurchase[]
+
+  @@index([name])
+}
+
+model RawPurchase {
+  id           String   @id @default(cuid())
+  vendorId     String
+  lotNumber    String
+  quantity     Float
+  purchaseRate Float
+  totalAmount  Float
+  date         DateTime
+  createdById  String?
+  createdBy    User?    @relation("RawPurchaseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  vendor ManufacturingVendor @relation(fields: [vendorId], references: [id])
+  invoice Invoice?
+
+  @@index([lotNumber])
+  @@index([vendorId, date])
+  @@index([date])
+}
+
+model MachineEntry {
+  id           String   @id @default(cuid())
+  lotNumber    String
+  quantitySent Float
+  date         DateTime
+  createdById  String?
+  createdBy    User?    @relation("MachineEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([lotNumber, date])
+  @@index([date])
+}
+
+model QualityProduction {
+  id              String   @id @default(cuid())
+  lotNumber       String?
+  date            DateTime
+  quantity6No     Float    @default(0)
+  quantity5No     Float    @default(0)
+  quantity4_5No   Float    @default(0)
+  quantity4No     Float    @default(0)
+  quantityOthers  Float    @default(0)
+  rate6No         Float    @default(0)
+  rate5No         Float    @default(0)
+  rate4_5No       Float    @default(0)
+  rate4No         Float    @default(0)
+  rateOthers      Float    @default(0)
+  totalOutput     Float    @default(0)
+  createdById     String?
+  createdBy       User?    @relation("QualityProductionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([date])
+  @@index([lotNumber, date])
+}
+
+model Brand {
+  id              String   @id @default(cuid())
+  name            String
+  packetSizeGrams Float
+  proportion6No   Float    @default(0)
+  proportion5No   Float    @default(0)
+  proportion4_5No Float    @default(0)
+  proportion4No     Float    @default(0)
+  proportionOthers  Float    @default(0)
+  packingWeightGrams Float   @default(0)
+  packagingPrice    Float    @default(0)
+  isActive          Boolean  @default(true)
+  createdById     String?
+  createdBy       User?    @relation("BrandCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  packagingTransactions PackagingTransaction[]
+  stockLedgers          StockLedger[]
+  manufacturingSales    ManufacturingSale[]
+
+  @@unique([name, packetSizeGrams])
+  @@index([name])
+  @@index([isActive])
+}
+
+model PackagingTransaction {
+  id               String   @id @default(cuid())
+  serialNumber     String   @unique
+  date             DateTime
+  lotNumber        String
+  brandId          String
+  quantityPackedKg Float
+  packetsCreated   Float
+  consumed6No      Float    @default(0)
+  consumed5No      Float    @default(0)
+  consumed4_5No    Float    @default(0)
+  consumed4No      Float    @default(0)
+  consumedOthers   Float    @default(0)
+  costPerPacket    Float    @default(0)
+  remarks          String?
+  createdById      String?
+  createdBy        User?    @relation("PackagingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Restrict)
+
+  @@index([date])
+  @@index([lotNumber, date])
+  @@index([brandId, date])
+}
+
+model FinishedProduction {
+  id                String         @id @default(cuid())
+  batchNumber       String         @unique
+  lotNumber         String?
+  date              DateTime
+  finishedQuantity  Float
+  remainingQuantity Float
+  productionMode    ProductionMode
+  consumed6No       Float          @default(0)
+  consumed5No       Float          @default(0)
+  consumed4_5No     Float          @default(0)
+  consumed4No       Float          @default(0)
+  consumedOthers    Float          @default(0)
+  finishedRate      Float          @default(0)
+  finishedValue     Float          @default(0)
+  createdById       String?
+  createdBy         User?          @relation("FinishedProductionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  saleAllocations   ManufacturingSaleAllocation[]
+  stockLedgers      StockLedger[]
+  damageLines       ManufacturingDamageLine[]
+
+  @@index([date])
+  @@index([lotNumber, date])
+  @@index([remainingQuantity])
+}
+
+model ManufacturingSale {
+  id                String                @id @default(cuid())
+  serialNumber      String                @unique
+  date              DateTime
+  customerName      String
+  customerPhone     String?
+  customerEmail     String?
+  customerAddress   String?
+  customerGstNumber String?
+  saleType          ManufacturingSaleType @default(loose)
+  brandId           String?
+  productCategory   StockCategory         @default(finished_goods)
+  quantity          Float                 @default(0)
+  packetCount       Float?
+  rate              Float                 @default(0)
+  amount            Float
+  costOfGoodsSold   Float                 @default(0)
+  createdById       String?
+  createdBy         User?                 @relation("MfgSaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  brand       Brand?                        @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  invoice     Invoice?
+  allocations ManufacturingSaleAllocation[]
+
+  @@index([date])
+  @@index([customerName, date])
+  @@index([saleType])
+  @@index([brandId])
+}
+
+model ManufacturingSaleAllocation {
+  id        String   @id @default(cuid())
+  saleId    String
+  batchId   String
+  quantity  Float
+  costPerKg Float
+  totalCost Float
+  createdAt DateTime @default(now())
+
+  sale  ManufacturingSale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  batch FinishedProduction @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([saleId])
+  @@index([batchId])
+}
+
+model ManufacturingDamage {
+  id           String   @id @default(cuid())
+  serialNumber String   @unique
+  date         DateTime
+  totalLoss    Float    @default(0)
+  createdById  String?
+  createdBy    User?    @relation("MfgDamageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lines ManufacturingDamageLine[]
+
+  @@index([date])
+}
+
+model ManufacturingDamageLine {
+  id            String        @id @default(cuid())
+  damageId      String
+  inventoryType StockCategory
+  lotNumber     String?
+  batchId       String?
+  batchNumber   String?
+  quantity      Float
+  costPerKg     Float         @default(0)
+  lossAmount    Float         @default(0)
+  reason        String?
+  damage        ManufacturingDamage @relation(fields: [damageId], references: [id], onDelete: Cascade)
+  batch         FinishedProduction? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([damageId])
+  @@index([inventoryType])
+  @@index([batchId])
+  @@index([lotNumber])
+}
+
+model TradingDamage {
+  id           String   @id @default(cuid())
+  serialNumber String   @unique
+  date         DateTime
+  totalLoss    Float    @default(0)
+  createdById  String?
+  createdBy    User?    @relation("TradingDamageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lines TradingDamageLine[]
+
+  @@index([date])
+}
+
+model TradingDamageLine {
+  id          String  @id @default(cuid())
+  damageId    String
+  itemId      String
+  quantity    Float
+  costPerUnit Float   @default(0)
+  lossAmount  Float   @default(0)
+  reason      String?
+  damage      TradingDamage @relation(fields: [damageId], references: [id], onDelete: Cascade)
+  item        Item    @relation(fields: [itemId], references: [id])
+
+  @@index([damageId])
+  @@index([itemId])
+}
+
+model StockLedger {
+  id            String            @id @default(cuid())
+  category      StockCategory
+  itemId        String?
+  brandId       String?
+  lotNumber     String?
+  batchId       String?
+  movementType  StockMovementType
+  quantity      Float
+  direction     StockDirection
+  balanceAfter  Float
+  referenceType String
+  referenceId   String
+  date          DateTime          @default(now())
+  createdById   String?
+  createdBy     User?             @relation("StockLedgerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  item  Item?               @relation(fields: [itemId], references: [id])
+  brand Brand?              @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  batch FinishedProduction? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([category, date])
+  @@index([category, itemId, date])
+  @@index([category, brandId, date])
+  @@index([lotNumber, date])
+  @@index([batchId, date])
+  @@index([referenceType, referenceId])
+}
+
+model Ledger {
+  id             String        @id @default(cuid())
+  name           String
+  type           LedgerType
+  businessUnit   BusinessUnit?
+  partyId        String?
+  openingBalance Float         @default(0)
+  currentBalance Float         @default(0)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  party    Party?        @relation(fields: [partyId], references: [id])
+  entries  LedgerEntry[]
+  expenses Expense[]
+
+  @@unique([name, type, businessUnit])
+  @@index([type])
+  @@index([partyId])
+  @@index([businessUnit])
+}
+
+model LedgerEntry {
+  id            String        @id @default(cuid())
+  ledgerId      String
+  businessUnit  BusinessUnit?
+  date          DateTime      @default(now())
+  debit         Float         @default(0)
+  credit        Float         @default(0)
+  balanceAfter  Float
+  narration     String?
+  referenceType String?
+  referenceId   String?
+  createdById   String?
+  createdBy     User?         @relation("LedgerEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  ledger Ledger @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+
+  @@index([ledgerId, date])
+  @@index([referenceType, referenceId])
+  @@index([businessUnit])
+  @@index([date])
+}
+
+model Expense {
+  id           String             @id @default(cuid())
+  businessUnit BusinessUnit
+  date         DateTime
+  type         ExpenseType
+  category     String
+  amount       Float
+  description  String?
+  paymentMode  ExpensePaymentMode @default(cash)
+  ledgerId     String?
+  createdById  String?
+  createdBy    User?              @relation("ExpenseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  ledger Ledger? @relation(fields: [ledgerId], references: [id])
+
+  @@index([businessUnit, date])
+  @@index([type, date])
+  @@index([date])
+}
+
+model Invoice {
+  id                  String             @id @default(cuid())
+  invoiceNumber       String             @unique
+  invoiceType         InvoiceType        @default(customer)
+  date                DateTime
+  partyName           String
+  partyId             String?
+  tradingSaleId       String?            @unique
+  manufacturingSaleId String?            @unique
+  tradingPurchaseId   String?            @unique
+  rawPurchaseId       String?            @unique
+  reference           String?
+  totalQuantity       Float              @default(0)
+  amount              Float
+  gstDetails          Json?
+  contactDetails      Json?
+  paymentMode         InvoicePaymentMode @default(cash)
+  paidAmount          Float              @default(0)
+  dueAmount           Float              @default(0)
+  paymentStatus       PaymentStatus      @default(unpaid)
+  createdById         String?
+  createdBy           User?              @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  party             Party?             @relation(fields: [partyId], references: [id])
+  tradingSale       Sale?              @relation(fields: [tradingSaleId], references: [id])
+  manufacturingSale ManufacturingSale? @relation(fields: [manufacturingSaleId], references: [id])
+  tradingPurchase   Purchase?          @relation(fields: [tradingPurchaseId], references: [id])
+  rawPurchase       RawPurchase?       @relation(fields: [rawPurchaseId], references: [id])
+  items             InvoiceLineItem[]
+
+  @@index([date])
+  @@index([paymentStatus])
+  @@index([invoiceType])
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String?
+  quantity    Float
+  rate        Float?
+  amount      Float
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  action        String
+  module        String
+  resourceId    String?
+  recordType    String?
+  description   String?
+  oldValue      Json?
+  newValue      Json?
+  priority      String   @default("normal")
+  financialYear String?
+  details       Json?
+  ip            String?
+  createdAt     DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([module, action])
+  @@index([action, createdAt])
+  @@index([financialYear])
+  @@index([recordType])
+  @@index([priority])
+}
+
+model InventoryAuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  date            DateTime @default(now())
+  sourceModule    String
+  stockType       String
+  quantityBefore  Float
+  quantityChanged Float
+  quantityAfter   Float
+  referenceType   String?
+  referenceId     String?
+  ip              String?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
+  @@index([sourceModule, stockType])
+  @@index([date])
+}

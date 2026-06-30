@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "User" DROP COLUMN IF EXISTS "lastLogin";
+ALTER TABLE "User" DROP COLUMN IF EXISTS "lastLogout";
+
+ALTER TABLE "Purchase" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "Sale" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "ManufacturingVendor" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "RawPurchase" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "MachineEntry" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "QualityProduction" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "FinishedProduction" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "ManufacturingSale" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "ManufacturingDamage" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "TradingDamage" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "StockLedger" DROP COLUMN IF EXISTS "notes";
+ALTER TABLE "Invoice" DROP COLUMN IF EXISTS "notes";
