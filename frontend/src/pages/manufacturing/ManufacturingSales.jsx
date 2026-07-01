@@ -16,6 +16,7 @@ import {
   packetsFromGrossKg,
   grossKgFromPackets,
   qualityPerPacketGrams,
+  packetSizeKg,
 } from '../../utils/brandedPackaging';
 
 export default function ManufacturingSales() {
@@ -40,6 +41,9 @@ export default function ManufacturingSales() {
   const calculatedPackets = isBranded && selectedBrand
     ? packetsFromGrossKg(selectedBrand, parseFloat(brandedQuantity))
     : 0;
+  const availableKg = isBranded && selectedBrand && availableStock !== null
+    ? grossKgFromPackets(selectedBrand, availableStock)
+    : null;
 
   const openCreate = () => {
     setEditRow(null);
@@ -61,7 +65,18 @@ export default function ManufacturingSales() {
       ? row.quantity
       : grossKgFromPackets(brand, row.packetCount ?? 0);
     setBrandedQuantity(qty != null && qty > 0 ? String(qty) : '');
-    setBrandedRate(row.rate != null ? String(row.rate) : '');
+    if (qty > 0 && row.amount != null) {
+      setBrandedRate(String(Math.round((row.amount / qty) * 100) / 100));
+    } else if (brand && row.rate != null) {
+      const perPacketKg = packetSizeKg(brand);
+      setBrandedRate(
+        perPacketKg > 0
+          ? String(Math.round((row.rate / perPacketKg) * 100) / 100)
+          : String(row.rate)
+      );
+    } else {
+      setBrandedRate(row.rate != null ? String(row.rate) : '');
+    }
     setBrandedAmount(row.amount != null ? String(row.amount) : '');
     setModalOpen(true);
   };
@@ -103,12 +118,12 @@ export default function ManufacturingSales() {
   }, [modalOpen, editRow, isBranded, selectedBrandId]);
 
   useEffect(() => {
-    const packets = calculatedPackets;
+    const quantity = parseFloat(brandedQuantity);
     const rate = parseFloat(brandedRate);
-    if (!Number.isNaN(packets) && !Number.isNaN(rate) && packets > 0 && rate >= 0) {
-      setBrandedAmount(String(Math.round(packets * rate * 100) / 100));
+    if (!Number.isNaN(quantity) && !Number.isNaN(rate) && quantity > 0 && rate >= 0) {
+      setBrandedAmount(String(Math.round(quantity * rate * 100) / 100));
     }
-  }, [calculatedPackets, brandedRate]);
+  }, [brandedQuantity, brandedRate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -125,8 +140,8 @@ export default function ManufacturingSales() {
         toast.error('Quantity is too small for one packet at this brand size');
         return;
       }
-      if (availableStock !== null && packets > availableStock) {
-        toast.error(`Insufficient branded stock. Available: ${formatNumber(availableStock)} packets`);
+      if (availableKg !== null && quantity > availableKg) {
+        toast.error(`Insufficient branded stock. Available: ${formatNumber(availableKg)} KG`);
         return;
       }
       const payload = {
@@ -249,7 +264,13 @@ export default function ManufacturingSales() {
                           ? `${formatNumber(r.quantity)} KG (${formatNumber(r.packetCount)} pkt)`
                           : `${formatNumber(r.quantity)} KG`}
                       </td>
-                      <td>{formatCurrency(r.rate)}{branded ? '/pkt' : '/KG'}</td>
+                      <td>
+                        {formatCurrency(
+                          branded && r.quantity > 0
+                            ? Math.round((r.amount / r.quantity) * 100) / 100
+                            : r.rate
+                        )}/KG
+                      </td>
                       <td>{formatCurrency(r.amount)}</td>
                       <td>{formatCurrency(r.costOfGoodsSold ?? 0)}</td>
                       <td>
@@ -328,8 +349,13 @@ export default function ManufacturingSales() {
                   ) : null}
                 </p>
               )}
-              {availableStock !== null && (
-                <p className="text-sm text-gray-500">Available packets: <strong>{formatNumber(availableStock)}</strong></p>
+              {availableKg !== null && (
+                <p className="text-sm text-gray-500">
+                  Available stock: <strong>{formatNumber(availableKg)} KG</strong>
+                  {availableStock > 0 && (
+                    <span className="text-gray-400"> ({formatNumber(availableStock)} packets)</span>
+                  )}
+                </p>
               )}
               <div>
                 <FieldLabel required>Total Gross Weight Sold (KG)</FieldLabel>
@@ -353,7 +379,7 @@ export default function ManufacturingSales() {
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <FieldLabel required>Rate per Packet (₹)</FieldLabel>
+                  <FieldLabel required>Rate per KG (₹)</FieldLabel>
                   <input
                     type="number"
                     step="any"
