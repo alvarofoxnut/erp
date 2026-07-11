@@ -19,7 +19,7 @@ export const login = asyncHandler(async (req, res) => {
   res.cookie('accessToken', result.accessToken, accessTokenCookieOptions());
   res.cookie('refreshToken', result.refreshToken, refreshTokenCookieOptions());
 
-  successResponse(res, { user: result.user }, 'Login successful');
+  successResponse(res, { user: result.user, accessToken: result.accessToken }, 'Login successful');
 });
 
 export const refresh = asyncHandler(async (req, res) => {
@@ -29,7 +29,7 @@ export const refresh = asyncHandler(async (req, res) => {
   res.cookie('accessToken', result.accessToken, accessTokenCookieOptions());
   res.cookie('refreshToken', result.refreshToken, refreshTokenCookieOptions());
 
-  successResponse(res, null, 'Token refreshed');
+  successResponse(res, { accessToken: result.accessToken }, 'Token refreshed');
 });
 
 export const logout = asyncHandler(async (req, res) => {

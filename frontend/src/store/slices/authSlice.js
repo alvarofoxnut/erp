@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import api from '../../services/api';
+import api, { clearMemoryAccessToken, setMemoryAccessToken } from '../../services/api';
 
 export const login = createAsyncThunk('auth/login', async (credentials, { rejectWithValue }) => {
   try {
@@ -23,7 +23,11 @@ export const fetchMe = createAsyncThunk('auth/fetchMe', async (_, { rejectWithVa
 });
 
 export const logout = createAsyncThunk('auth/logout', async () => {
-  await api.post('/auth/logout');
+  try {
+    await api.post('/auth/logout');
+  } finally {
+    clearMemoryAccessToken();
+  }
 });
 
 const authSlice = createSlice({
@@ -44,6 +48,9 @@ const authSlice = createSlice({
         state.loading = false;
         state.user = action.payload.user;
         state.isAuthenticated = true;
+        if (action.payload.accessToken) {
+          setMemoryAccessToken(action.payload.accessToken);
+        }
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
@@ -57,6 +64,7 @@ const authSlice = createSlice({
         if (action.payload?.status === 401) {
           state.user = null;
           state.isAuthenticated = false;
+          clearMemoryAccessToken();
         }
       })
       .addCase(logout.fulfilled, (state) => {

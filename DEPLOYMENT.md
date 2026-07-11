@@ -134,7 +134,7 @@ Browser → Vercel (React)
          Neon (PostgreSQL)
 ```
 
-Auth: access token in `localStorage`; refresh token in **httpOnly cookie** with `SameSite=None; Secure` when `COOKIE_CROSS_ORIGIN=true`.
+Auth: httpOnly cookies (primary) plus in-memory Bearer token (cross-origin fallback). Cookies use `SameSite=None; Secure` when `CLIENT_URL` is a remote HTTPS origin or `COOKIE_CROSS_ORIGIN=true`.
 
 ---
 

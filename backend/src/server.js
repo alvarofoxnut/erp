@@ -26,7 +26,8 @@ import auditRoutes from './modules/audit/audit.routes.js';
 import importRoutes from './modules/import/import.routes.js';
 import deletedRoutes from './modules/deleted/deletedRecords.routes.js';
 import { seedDefaultRoles } from './config/seedRoles.js';
-import { corsOriginDelegate } from './shared/utils/corsOrigins.js';
+import { corsOriginDelegate, getAllowedOrigins } from './shared/utils/corsOrigins.js';
+import { getCookieDeploymentMode } from './shared/utils/cookieOptions.js';
 
 dotenv.config();
 validateEnv();
@@ -71,7 +72,14 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'Makhana ERP API is running' });
+  res.json({
+    success: true,
+    message: 'Makhana ERP API is running',
+    auth: {
+      cookies: getCookieDeploymentMode(),
+      corsOrigins: getAllowedOrigins().length,
+    },
+  });
 });
 
 app.use('/api/auth', authRoutes);
@@ -98,6 +106,7 @@ const PORT = process.env.PORT || 5000;
 
 const server = app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
+  logger.info(`Auth cookies: ${getCookieDeploymentMode()}`);
 });
 
 server.on('error', (err) => {
