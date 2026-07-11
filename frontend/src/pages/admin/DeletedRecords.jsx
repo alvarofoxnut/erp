@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import api from '../services/api';
-import { PageHeader, Pagination, ListPageToolbar, EmptyState } from '../components/common';
-import { formatDateTime } from '../utils/helpers';
-import { getErrorMessage } from '../utils/helpers';
-import LoadingSpinner from '../components/LoadingSpinner';
+import api from '../../services/api';
+import { PageHeader, Pagination, ListPageToolbar, EmptyState } from '../../components/common';
+import { formatDateTime, getErrorMessage } from '../../utils/helpers';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function DeletedRecords() {
   const [modules, setModules] = useState([]);
