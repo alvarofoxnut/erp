@@ -12,22 +12,31 @@ export default function ConfirmDialog({
   variant = 'danger',
   doubleConfirm = true,
   step2Message: step2MessageProp,
+  collectDeleteReason = false,
 }) {
   const [step, setStep] = useState(1);
+  const [deleteReason, setDeleteReason] = useState('');
 
   useEffect(() => {
-    if (isOpen) setStep(1);
+    if (isOpen) {
+      setStep(1);
+      setDeleteReason('');
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleFirstConfirm = () => {
     if (doubleConfirm) setStep(2);
-    else onConfirm();
+    else onConfirm(collectDeleteReason ? deleteReason : undefined);
+  };
+
+  const handleFinalConfirm = () => {
+    onConfirm(collectDeleteReason ? deleteReason : undefined);
   };
 
   const isDelete = variant === 'danger';
-  const step2Message = step2MessageProp ?? 'This will update stock ledger balances. This action cannot be undone.';
+  const step2Message = step2MessageProp ?? 'This will update stock ledger balances. The record will be moved to deleted items (admin can restore).';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 overflow-y-auto">
@@ -36,11 +45,23 @@ export default function ConfirmDialog({
           <div className={`p-2 rounded-full ${isDelete ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
             <AlertTriangle className="h-5 w-5" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="text-lg font-semibold">{step === 1 ? title : 'Please confirm again'}</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {step === 1 ? message : step2Message}
             </p>
+            {step === 2 && collectDeleteReason && (
+              <div className="mt-3">
+                <label className="block text-sm font-medium mb-1">Delete reason (optional)</label>
+                <textarea
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  className="input-field w-full"
+                  rows={2}
+                  placeholder="Why is this record being deleted?"
+                />
+              </div>
+            )}
           </div>
         </div>
         <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
@@ -51,7 +72,7 @@ export default function ConfirmDialog({
             </button>
           ) : (
             <button
-              onClick={onConfirm}
+              onClick={handleFinalConfirm}
               className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium"
             >
               Yes, {confirmLabel.toLowerCase()}
@@ -67,7 +88,7 @@ export function DeleteButton({
   onDelete,
   title = 'Delete entry',
   message = 'Are you sure you want to delete this entry?',
-  step2Message = 'This action cannot be undone.',
+  step2Message = 'This will update stock ledger balances. The record will be moved to deleted items.',
   className = 'text-red-600 hover:text-red-800',
   children,
 }) {
@@ -81,13 +102,14 @@ export function DeleteButton({
       <ConfirmDialog
         isOpen={open}
         onClose={() => setOpen(false)}
-        onConfirm={() => { setOpen(false); onDelete(); }}
+        onConfirm={(reason) => { setOpen(false); onDelete(reason); }}
         title={title}
         message={message}
         confirmLabel="Delete"
         variant="danger"
         doubleConfirm
         step2Message={step2Message}
+        collectDeleteReason
       />
     </>
   );
@@ -100,7 +122,7 @@ export function EntryActions({
   deleteTitle = 'Delete entry',
   editMessage = 'You are about to edit this stock entry. Stock balances will be recalculated.',
   deleteMessage = 'Are you sure you want to delete this entry?',
-  step2Message = 'This will update stock ledger balances. This action cannot be undone.',
+  step2Message = 'This will update stock ledger balances. The record will be moved to deleted items.',
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -125,13 +147,14 @@ export function EntryActions({
       <ConfirmDialog
         isOpen={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        onConfirm={() => { setDeleteOpen(false); onDelete(); }}
+        onConfirm={(reason) => { setDeleteOpen(false); onDelete(reason); }}
         title={deleteTitle}
         message={deleteMessage}
         confirmLabel="Delete"
         variant="danger"
         doubleConfirm
         step2Message={step2Message}
+        collectDeleteReason
       />
     </>
   );

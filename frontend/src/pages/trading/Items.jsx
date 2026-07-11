@@ -74,7 +74,7 @@ export default function Items() {
                     <td className="flex gap-2">
                       <button onClick={() => openEdit(item)} className="text-blue-600 hover:text-blue-800"><Pencil className="h-4 w-4" /></button>
                       <DeleteButton
-                        onDelete={() => deleteItem(item._id)}
+                        onDelete={(reason) => deleteItem(item._id, reason)}
                         title="Delete item"
                         message={`Are you sure you want to delete item "${item.name}"?`}
                       >

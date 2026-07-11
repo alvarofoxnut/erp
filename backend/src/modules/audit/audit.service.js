@@ -2,7 +2,7 @@ import { prisma } from '../../config/db.js';
 import { buildPagination, buildPaginationMeta, getFinancialYear, getDateRange } from '../../shared/utils/helpers.js';
 import { getDisplayDescription } from '../../shared/utils/auditDescription.js';
 import ExcelJS from 'exceljs';
-import { AUDIT_MODULES, AUTH_SESSION_AUDIT_ACTIONS } from '../../shared/constants/audit.js';
+import { AUDIT_MODULES, AUTH_SESSION_AUDIT_ACTIONS, AUDIT_ACTIONS } from '../../shared/constants/audit.js';
 
 const auditInclude = {
   user: { select: { id: true, name: true, email: true, role: true } },
@@ -95,19 +95,35 @@ class AuditModuleService {
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
     const authSessionFilter = { action: { notIn: AUTH_SESSION_AUDIT_ACTIONS } };
     const todayFilter = { createdAt: { gte: todayStart, lte: todayEnd }, ...authSessionFilter };
+    const failedLoginFilter = { action: AUDIT_ACTIONS.FAILED_LOGIN };
 
     const [
       totalActionsToday,
       totalUpdatesToday,
       totalDeletesToday,
+      failedLoginsToday,
+      failedLoginsLastHour,
+      recentFailedLogins,
       recentActivity,
     ] = await Promise.all([
       prisma.auditLog.count({ where: todayFilter }),
       prisma.auditLog.count({ where: { ...todayFilter, action: 'update' } }),
       prisma.auditLog.count({ where: { ...todayFilter, action: 'delete' } }),
+      prisma.auditLog.count({
+        where: { ...failedLoginFilter, createdAt: { gte: todayStart, lte: todayEnd } },
+      }),
+      prisma.auditLog.count({
+        where: { ...failedLoginFilter, createdAt: { gte: hourAgo } },
+      }),
+      prisma.auditLog.findMany({
+        where: failedLoginFilter,
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
       prisma.auditLog.findMany({
         where: todayFilter,
         include: auditInclude,
@@ -120,8 +136,35 @@ class AuditModuleService {
       totalActionsToday,
       totalUpdatesToday,
       totalDeletesToday,
+      security: {
+        failedLoginsToday,
+        failedLoginsLastHour,
+        recentFailedLogins,
+      },
       recentActivity,
     };
+  }
+
+  async getSecurityEvents({ page = 1, limit = 20, startDate, endDate } = {}) {
+    const { page: pageNum, limit: limitNum, skip } = buildPagination(page, limit);
+    const where = { action: AUDIT_ACTIONS.FAILED_LOGIN };
+
+    if (startDate || endDate) {
+      const { start, end } = getDateRange(startDate, endDate);
+      where.createdAt = { gte: start, lte: end };
+    }
+
+    const [events, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+      prisma.auditLog.count({ where }),
+    ]);
+
+    return { events, pagination: buildPaginationMeta(total, pageNum, limitNum) };
   }
 
   getFilterOptions() {

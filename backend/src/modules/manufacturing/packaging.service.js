@@ -7,6 +7,15 @@ import { STOCK_CATEGORIES } from '../../shared/constants/index.js';
 import AppError from '../../shared/utils/AppError.js';
 import { calculateBrandConsumption, validateBrandProportions } from '../../shared/utils/brandValidation.js';
 import { validateOutboundCapacity } from '../inventory/stockValidation.js';
+import {
+  ACTIVE_ONLY,
+  buildListFilter,
+  softDeletePayload,
+  restorePayload,
+  assertNotDeleted,
+  assertIsDeleted,
+  softDeleteInvoice,
+} from '../../shared/utils/softDelete.js';
 
 const createdByInclude = {
   createdBy: { select: { id: true, name: true } },
@@ -44,7 +53,7 @@ const QUALITY_LABELS = {
 class PackagingService {
   async getBrandOrThrow(brandId, tx = prisma) {
     const brand = await tx.brand.findFirst({
-      where: { id: brandId, isActive: true },
+      where: { ...ACTIVE_ONLY, id: brandId, isActive: true },
     });
     if (!brand) throw new AppError('Brand not found', 404);
     return brand;
@@ -153,14 +162,25 @@ class PackagingService {
     });
   }
 
-  async getPackagingTransactions({ search, startDate, endDate, lotNumber, brandId, page = 1, limit = 10 }) {
+  async getPackagingTransactions({
+    search,
+    startDate,
+    endDate,
+    lotNumber,
+    brandId,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const baseWhere = {
       ...buildSearchFilter(search, ['serialNumber', 'lotNumber', 'remarks']),
       ...(date ? { date } : {}),
       ...(lotNumber ? { lotNumber } : {}),
       ...(brandId ? { brandId } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [transactions, total] = await Promise.all([
@@ -183,7 +203,7 @@ class PackagingService {
 
     return withTransaction(async (tx) => {
       const existing = await tx.packagingTransaction.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Packaging transaction not found', 404);
+      assertNotDeleted(existing, 'Packaging transaction');
 
       const brand = await this.getBrandOrThrow(data.brandId, tx);
       const calc = calculateBrandConsumption(brand, data.quantityPackedKg);
@@ -264,10 +284,10 @@ class PackagingService {
     });
   }
 
-  async deletePackaging(id) {
+  async deletePackaging(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.packagingTransaction.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Packaging transaction not found', 404);
+      assertNotDeleted(existing, 'Packaging transaction');
 
       await inventoryService.validateDeleteMovementsByReference(
         'PackagingTransaction',
@@ -275,7 +295,54 @@ class PackagingService {
         tx
       );
       await inventoryService.deleteMovementsByReference('PackagingTransaction', existing.id, tx);
-      await tx.packagingTransaction.delete({ where: { id } });
+      return tx.packagingTransaction.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restorePackaging(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.packagingTransaction.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Packaging transaction');
+
+      await this.validateLotStock(
+        existing.lotNumber,
+        {
+          consumed6No: existing.consumed6No,
+          consumed5No: existing.consumed5No,
+          consumed4_5No: existing.consumed4_5No,
+          consumed4No: existing.consumed4No,
+          consumedOthers: existing.consumedOthers,
+        },
+        tx
+      );
+
+      const transaction = await tx.packagingTransaction.update({
+        where: { id },
+        data: restorePayload(),
+        include: brandInclude,
+      });
+
+      await inventoryService.recordBrandedPackaging(
+        {
+          lotNumber: transaction.lotNumber,
+          brandId: transaction.brandId,
+          packetsCreated: transaction.packetsCreated,
+          consumed6No: transaction.consumed6No,
+          consumed5No: transaction.consumed5No,
+          consumed4_5No: transaction.consumed4_5No,
+          consumed4No: transaction.consumed4No,
+          consumedOthers: transaction.consumedOthers,
+          referenceId: transaction.id,
+          date: transaction.date,
+          createdBy: userId || transaction.createdById,
+        },
+        tx
+      );
+
+      return transaction;
     });
   }
 
@@ -287,7 +354,7 @@ class PackagingService {
     const client = tx ?? prisma;
     const end = endOfDay(asOfDate);
     const rows = await client.packagingTransaction.findMany({
-      where: { brandId, date: { lte: end } },
+      where: { ...ACTIVE_ONLY, brandId, date: { lte: end } },
       select: { packetsCreated: true, costPerPacket: true },
     });
     const totalPackets = rows.reduce((s, r) => s + r.packetsCreated, 0);

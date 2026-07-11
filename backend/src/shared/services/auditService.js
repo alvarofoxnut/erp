@@ -181,7 +181,11 @@ class AuditService {
     const config = AUDIT_MODULE_MAP[moduleKey];
     if (!config || !id) return null;
     try {
-      return await prisma[config.model].findUnique({ where: { id: String(id) } });
+      const query = { where: { id: String(id) } };
+      if (config.model === 'user') {
+        query.omit = { password: true, refreshToken: true };
+      }
+      return await prisma[config.model].findUnique(query);
     } catch {
       return null;
     }

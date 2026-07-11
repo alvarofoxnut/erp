@@ -6,6 +6,7 @@ import { buildPagination, buildPaginationMeta, getDateRange } from '../../shared
 import { parseBusinessUnits } from './businessUnit.js';
 import reportsService from '../reports/reports.service.js';
 import auditService from '../../shared/services/auditService.js';
+import { getDeleteMeta } from '../../shared/utils/softDelete.js';
 
 const expenseFields = [
   body('date').isISO8601(),
@@ -42,7 +43,8 @@ export const updateExpense = asyncHandler(async (req, res) => {
 });
 
 export const deleteExpense = asyncHandler(async (req, res) => {
-  await accountingModuleService.deleteExpense(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await accountingModuleService.deleteExpense(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Expense deleted');
 });
 
@@ -109,7 +111,8 @@ export const updateInvoicePayment = asyncHandler(async (req, res) => {
 });
 
 export const deleteInvoice = asyncHandler(async (req, res) => {
-  await accountingModuleService.deleteInvoice(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await accountingModuleService.deleteInvoice(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Invoice deleted');
 });
 

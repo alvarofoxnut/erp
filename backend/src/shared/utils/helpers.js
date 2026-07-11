@@ -1,21 +1,26 @@
 import jwt from 'jsonwebtoken';
 import AppError from './AppError.js';
 
+const JWT_SIGN_OPTS = { algorithm: 'HS256' };
+const JWT_VERIFY_OPTS = { algorithms: ['HS256'] };
+
 export const generateAccessToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+    ...JWT_SIGN_OPTS,
     expiresIn: process.env.JWT_ACCESS_EXPIRES || '15m',
   });
 };
 
 export const generateRefreshToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
+    ...JWT_SIGN_OPTS,
     expiresIn: process.env.JWT_REFRESH_EXPIRES || '7d',
   });
 };
 
 export const verifyAccessToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    return jwt.verify(token, process.env.JWT_ACCESS_SECRET, JWT_VERIFY_OPTS);
   } catch {
     throw new AppError('Invalid or expired access token', 401);
   }
@@ -23,7 +28,7 @@ export const verifyAccessToken = (token) => {
 
 export const verifyRefreshToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+    return jwt.verify(token, process.env.JWT_REFRESH_SECRET, JWT_VERIFY_OPTS);
   } catch {
     throw new AppError('Invalid or expired refresh token', 401);
   }

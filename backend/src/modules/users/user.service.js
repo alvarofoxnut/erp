@@ -62,22 +62,32 @@ class UserService {
     const existingUser = await prisma.user.findUnique({ where: { id } });
     if (!existingUser) throw new AppError('User not found', 404);
 
-    if (data.email) {
+    const updateData = {};
+
+    if (data.name !== undefined) updateData.name = data.name;
+
+    if (data.email !== undefined) {
       const emailTaken = await prisma.user.findFirst({
         where: { email: data.email, NOT: { id } },
       });
       if (emailTaken) throw new AppError('Email already exists', 409);
+      updateData.email = data.email;
     }
 
-    const updateData = { ...data };
-
-    if (data.role) {
+    if (data.role !== undefined) {
       await roleService.getBySlug(data.role);
+      updateData.role = data.role;
       updateData.permissions = await roleService.resolvePermissionsForRole(data.role);
     }
 
-    if (data.password) {
+    if (data.password !== undefined) {
       updateData.password = await hashPassword(data.password);
+      updateData.refreshToken = null;
+      updateData.tokenVersion = { increment: 1 };
+    }
+
+    if (data.isActive !== undefined) {
+      updateData.isActive = data.isActive;
     }
 
     return prisma.user.update({

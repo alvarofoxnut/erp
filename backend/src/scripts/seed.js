@@ -8,6 +8,21 @@ import logger from '../shared/utils/logger.js';
 
 dotenv.config();
 
+const DEFAULT_DEV_SEED_PASSWORD = 'admin123';
+const isProd = process.env.NODE_ENV === 'production';
+
+function resolveSeedAdminPassword() {
+  const fromEnv = process.env.SEED_ADMIN_PASSWORD?.trim();
+  if (isProd) {
+    if (!fromEnv || fromEnv === DEFAULT_DEV_SEED_PASSWORD || fromEnv.length < 12) {
+      console.error('[FATAL] SEED_ADMIN_PASSWORD must be set to a strong password (min 12 chars, not admin123) when seeding in production');
+      process.exit(1);
+    }
+    return fromEnv;
+  }
+  return fromEnv || DEFAULT_DEV_SEED_PASSWORD;
+}
+
 const ledgerTemplates = [
   { name: 'Cash Account', type: 'cash' },
   { name: 'Bank Account', type: 'bank' },
@@ -26,7 +41,8 @@ const seed = async () => {
 
     if (!adminExists) {
       const permissions = await resolvePermissionsForRole('admin');
-      const password = await bcrypt.hash('admin123', 12);
+      const seedPassword = resolveSeedAdminPassword();
+      const password = await bcrypt.hash(seedPassword, 12);
       await prisma.user.create({
         data: {
           name: 'Admin User',
@@ -36,7 +52,7 @@ const seed = async () => {
           permissions,
         },
       });
-      logger.info('Admin user created: admin@makhanaerp.com / admin123');
+      logger.info('Admin user created (change password after first login)');
     }
 
     for (const unit of Object.values(BUSINESS_UNITS)) {

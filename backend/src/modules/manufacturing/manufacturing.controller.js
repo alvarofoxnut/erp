@@ -5,6 +5,7 @@ import packagingService from './packaging.service.js';
 import asyncHandler from '../../shared/utils/asyncHandler.js';
 import { successResponse, paginatedResponse } from '../../shared/utils/apiResponse.js';
 import { buildPagination, buildPaginationMeta } from '../../shared/utils/helpers.js';
+import { getDeleteMeta } from '../../shared/utils/softDelete.js';
 
 const dateRangeQuery = (req) => ({
   search: req.query.search,
@@ -103,8 +104,9 @@ export const updateVendor = asyncHandler(async (req, res) => {
 });
 
 export const deleteVendor = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteVendor(req.params.id);
-  successResponse(res, null, 'Manufacturing vendor deactivated');
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteVendor(req.params.id, userId, deleteReason);
+  successResponse(res, null, 'Manufacturing vendor deleted');
 });
 
 export const createBrand = asyncHandler(async (req, res) => {
@@ -138,8 +140,9 @@ export const updateBrand = asyncHandler(async (req, res) => {
 });
 
 export const deleteBrand = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteBrand(req.params.id);
-  successResponse(res, null, 'Brand deactivated');
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteBrand(req.params.id, userId, deleteReason);
+  successResponse(res, null, 'Brand deleted');
 });
 
 export const createPackaging = asyncHandler(async (req, res) => {
@@ -169,7 +172,8 @@ export const updatePackaging = asyncHandler(async (req, res) => {
 });
 
 export const deletePackaging = asyncHandler(async (req, res) => {
-  await packagingService.deletePackaging(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await packagingService.deletePackaging(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Packaging transaction deleted');
 });
 
@@ -250,7 +254,8 @@ export const updateRawPurchase = asyncHandler(async (req, res) => {
 });
 
 export const deleteRawPurchase = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteRawPurchase(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteRawPurchase(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Raw purchase deleted');
 });
 
@@ -260,7 +265,8 @@ export const updateMachineEntry = asyncHandler(async (req, res) => {
 });
 
 export const deleteMachineEntry = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteMachineEntry(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteMachineEntry(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Machine entry deleted');
 });
 
@@ -270,7 +276,8 @@ export const updateQualityProduction = asyncHandler(async (req, res) => {
 });
 
 export const deleteQualityProduction = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteQualityProduction(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteQualityProduction(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Quality production deleted');
 });
 
@@ -280,7 +287,8 @@ export const updateFinishedProduction = asyncHandler(async (req, res) => {
 });
 
 export const deleteFinishedProduction = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteFinishedProduction(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteFinishedProduction(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Finished production deleted');
 });
 
@@ -320,6 +328,7 @@ export const updateManufacturingSale = asyncHandler(async (req, res) => {
 });
 
 export const deleteManufacturingSale = asyncHandler(async (req, res) => {
-  await manufacturingService.deleteManufacturingSale(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await manufacturingService.deleteManufacturingSale(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Manufacturing sale deleted');
 });

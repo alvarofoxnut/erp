@@ -110,7 +110,7 @@ export default function Purchases() {
                   <tr key={r._id}>
                     <td className="font-mono">{r.serialNumber}</td><td>{formatDate(r.date)}</td><td>{r.party?.name}</td>
                     <td>{r.item?.name}</td><td>{formatNumber(r.quantity)}</td><td>{formatCurrency(r.rate)}</td><td>{formatCurrency(r.amount)}</td>
-                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={() => deleteItem(r._id)} deleteTitle="Delete purchase" editTitle="Edit purchase" /></td>
+                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete purchase" editTitle="Edit purchase" /></td>
                   </tr>
                 ))}
               </tbody>

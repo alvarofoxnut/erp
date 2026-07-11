@@ -10,6 +10,15 @@ import fifoAllocationService from '../inventory/fifoAllocation.service.js';
 import packagingService from './packaging.service.js';
 import { validateBrandProportions, calculateBrandedSalePackets } from '../../shared/utils/brandValidation.js';
 import {
+  ACTIVE_ONLY,
+  buildListFilter,
+  softDeletePayload,
+  restorePayload,
+  assertNotDeleted,
+  assertIsDeleted,
+  softDeleteInvoice,
+} from '../../shared/utils/softDelete.js';
+import {
   validateOutboundCapacity,
   validateWipOutbound,
   validateFinishedProductionStock,
@@ -146,13 +155,22 @@ function vendorIdFrom(data) {
 
 class ManufacturingService {
   // Manufacturing Vendors (raw material suppliers — separate from trading parties)
-  async getVendors({ search, startDate, endDate, page = 1, limit = 10 }) {
+  async getVendors({
+    search,
+    startDate,
+    endDate,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const createdAt = buildDateRange(startDate, endDate);
-    const where = {
+    const baseWhere = {
       isActive: true,
       ...buildSearchFilter(search, ['name', 'contactPerson', 'phone', 'email']),
       ...(createdAt ? { createdAt } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [vendors, total] = await Promise.all([
@@ -168,12 +186,36 @@ class ManufacturingService {
   }
 
   async createVendor(data, userId) {
+    const name = data.name?.trim();
+    if (!name) throw new AppError('Vendor name required', 400);
+
+    const existing = await prisma.manufacturingVendor.findUnique({ where: { name } });
+    if (existing) {
+      if (existing.isActive) {
+        throw new AppError('A vendor with this name already exists', 409);
+      }
+      return prisma.manufacturingVendor.update({
+        where: { id: existing.id },
+        data: {
+          name,
+          contactPerson: data.contactPerson,
+          phone: data.phone,
+          email: data.email,
+          address: data.address,
+          gstNumber: data.gstNumber,
+          isActive: true,
+        },
+      });
+    }
+
     return prisma.manufacturingVendor.create({
-      data: { ...data, createdById: userId },
+      data: { ...data, name, createdById: userId },
     });
   }
 
   async updateVendor(id, data) {
+    const existing = await prisma.manufacturingVendor.findUnique({ where: { id } });
+    assertNotDeleted(existing, 'Manufacturing vendor');
     try {
       return await prisma.manufacturingVendor.update({
         where: { id },
@@ -185,11 +227,13 @@ class ManufacturingService {
     }
   }
 
-  async deleteVendor(id) {
+  async deleteVendor(id, userId, deleteReason) {
+    const existing = await prisma.manufacturingVendor.findUnique({ where: { id } });
+    assertNotDeleted(existing, 'Manufacturing vendor');
     try {
       return await prisma.manufacturingVendor.update({
         where: { id },
-        data: { isActive: false },
+        data: softDeletePayload(userId, deleteReason, { deactivate: true }),
       });
     } catch (error) {
       if (error.code === 'P2025') throw new AppError('Manufacturing vendor not found', 404);
@@ -197,12 +241,22 @@ class ManufacturingService {
     }
   }
 
+  async restoreVendor(id) {
+    const existing = await prisma.manufacturingVendor.findUnique({ where: { id } });
+    assertIsDeleted(existing, 'Manufacturing vendor');
+    return prisma.manufacturingVendor.update({
+      where: { id },
+      data: restorePayload({ activate: true }),
+    });
+  }
+
   // Brand Master
-  async getBrands({ search, page = 1, limit = 10 }) {
-    const where = {
+  async getBrands({ search, page = 1, limit = 10, includeDeleted = false, deletedOnly = false }) {
+    const baseWhere = {
       isActive: true,
       ...buildSearchFilter(search, ['name']),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
     const skip = (page - 1) * limit;
     const [brands, total] = await Promise.all([
       prisma.brand.findMany({
@@ -218,13 +272,15 @@ class ManufacturingService {
 
   async getBrandOptions() {
     return prisma.brand.findMany({
-      where: { isActive: true },
+      where: { ...ACTIVE_ONLY, isActive: true },
       orderBy: [{ name: 'asc' }, { packetSizeGrams: 'asc' }],
     });
   }
 
   async getBrandStock(brandId) {
-    const brand = await prisma.brand.findFirst({ where: { id: brandId, isActive: true } });
+    const brand = await prisma.brand.findFirst({
+      where: { ...ACTIVE_ONLY, id: brandId, isActive: true },
+    });
     if (!brand) throw new AppError('Brand not found', 404);
     const balance = await inventoryService.getBrandStockBalance(brandId);
     return { brand, balance };
@@ -249,6 +305,8 @@ class ManufacturingService {
   }
 
   async updateBrand(id, data) {
+    const existing = await prisma.brand.findUnique({ where: { id } });
+    assertNotDeleted(existing, 'Brand');
     const proportions = validateBrandProportions(data);
     try {
       return await prisma.brand.update({
@@ -267,7 +325,9 @@ class ManufacturingService {
     }
   }
 
-  async deleteBrand(id) {
+  async deleteBrand(id, userId, deleteReason) {
+    const existing = await prisma.brand.findUnique({ where: { id } });
+    assertNotDeleted(existing, 'Brand');
     const stock = await inventoryService.getBrandStockBalance(id);
     if (stock > 0) {
       throw new AppError('Cannot deactivate brand with remaining stock', 400);
@@ -275,12 +335,21 @@ class ManufacturingService {
     try {
       return await prisma.brand.update({
         where: { id },
-        data: { isActive: false },
+        data: softDeletePayload(userId, deleteReason, { deactivate: true }),
       });
     } catch (error) {
       if (error.code === 'P2025') throw new AppError('Brand not found', 404);
       throw error;
     }
+  }
+
+  async restoreBrand(id) {
+    const existing = await prisma.brand.findUnique({ where: { id } });
+    assertIsDeleted(existing, 'Brand');
+    return prisma.brand.update({
+      where: { id },
+      data: restorePayload({ activate: true }),
+    });
   }
 
   // Raw Purchase
@@ -322,12 +391,21 @@ class ManufacturingService {
     });
   }
 
-  async getRawPurchases({ search, startDate, endDate, page = 1, limit = 10 }) {
+  async getRawPurchases({
+    search,
+    startDate,
+    endDate,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const baseWhere = {
       ...buildSearchFilter(search, ['lotNumber']),
       ...(date ? { date } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [purchases, total] = await Promise.all([
@@ -380,7 +458,16 @@ class ManufacturingService {
     });
   }
 
-  async getMachineEntries({ search, startDate, endDate, lotNumber, page = 1, limit = 10 }) {
+  async getMachineEntries({
+    search,
+    startDate,
+    endDate,
+    lotNumber,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const date = buildDateRange(startDate, endDate);
     const lotFilter = search
       ? buildSearchFilter(search, ['lotNumber'])
@@ -388,10 +475,11 @@ class ManufacturingService {
         ? { lotNumber }
         : undefined;
 
-    const where = {
+    const baseWhere = {
       ...(lotFilter ?? {}),
       ...(date ? { date } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [entries, total] = await Promise.all([
@@ -468,12 +556,21 @@ class ManufacturingService {
     });
   }
 
-  async getQualityProductions({ startDate, endDate, lotNumber, page = 1, limit = 10 }) {
+  async getQualityProductions({
+    startDate,
+    endDate,
+    lotNumber,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const baseWhere = {
       ...(date ? { date } : {}),
       ...(lotNumber ? { lotNumber } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [productions, total] = await Promise.all([
@@ -492,7 +589,7 @@ class ManufacturingService {
 
   async getLotQualityRates(lotNumber, tx = prisma) {
     const productions = await tx.qualityProduction.findMany({
-      where: { lotNumber },
+      where: { ...ACTIVE_ONLY, lotNumber },
       select: {
         quantity6No: true,
         quantity5No: true,
@@ -723,12 +820,21 @@ class ManufacturingService {
     });
   }
 
-  async getFinishedProductions({ startDate, endDate, lotNumber, page = 1, limit = 10 }) {
+  async getFinishedProductions({
+    startDate,
+    endDate,
+    lotNumber,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const baseWhere = {
       ...(date ? { date } : {}),
       ...(lotNumber ? { lotNumber } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [productions, total] = await Promise.all([
@@ -748,7 +854,7 @@ class ManufacturingService {
   async getProductionTrend(startDate, endDate) {
     const date = buildDateRange(startDate, endDate);
     const productions = await prisma.qualityProduction.findMany({
-      where: date ? { date } : {},
+      where: buildListFilter(date ? { date } : {}),
       select: { date: true, totalOutput: true },
     });
 
@@ -789,7 +895,7 @@ class ManufacturingService {
   async updateRawPurchase(id, data) {
     return withTransaction(async (tx) => {
       const existing = await tx.rawPurchase.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Raw purchase not found', 404);
+      assertNotDeleted(existing, 'Raw purchase');
 
       const stockUnchanged =
         sameLotNumber(existing.lotNumber, data.lotNumber) &&
@@ -865,27 +971,59 @@ class ManufacturingService {
     });
   }
 
-  async deleteRawPurchase(id) {
+  async deleteRawPurchase(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.rawPurchase.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Raw purchase not found', 404);
+      assertNotDeleted(existing, 'Raw purchase');
 
-      const invoice = await tx.invoice.findUnique({ where: { rawPurchaseId: id } });
-      if (invoice) {
-        await tx.invoice.delete({ where: { id: invoice.id } });
-      }
+      await softDeleteInvoice(tx, { rawPurchaseId: id }, userId, deleteReason);
 
       await inventoryService.validateDeleteMovementsByReference('RawPurchase', existing.id, tx);
       await accountingService.deleteLedgerEntriesByReference('RawPurchase', existing.id, tx);
       await inventoryService.deleteMovementsByReference('RawPurchase', existing.id, tx);
-      await tx.rawPurchase.delete({ where: { id } });
+      return tx.rawPurchase.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreRawPurchase(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.rawPurchase.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Raw purchase');
+
+      const purchase = await tx.rawPurchase.update({
+        where: { id },
+        data: restorePayload(),
+        include: rawPurchaseInclude,
+      });
+
+      await inventoryService.recordPurchase(
+        {
+          lotNumber: purchase.lotNumber,
+          quantity: purchase.quantity,
+          referenceId: purchase.id,
+          date: purchase.date,
+          createdBy: userId || purchase.createdById,
+        },
+        tx
+      );
+
+      await accountingService.recordRawPurchase(
+        asAccountingDoc(purchase),
+        { vendorName: purchase.vendor?.name },
+        tx
+      );
+
+      return purchase;
     });
   }
 
   async updateMachineEntry(id, data) {
     return withTransaction(async (tx) => {
       const existing = await tx.machineEntry.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Machine entry not found', 404);
+      assertNotDeleted(existing, 'Machine entry');
 
       const stockUnchanged =
         sameLotNumber(existing.lotNumber, data.lotNumber) &&
@@ -935,21 +1073,58 @@ class ManufacturingService {
     });
   }
 
-  async deleteMachineEntry(id) {
+  async deleteMachineEntry(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.machineEntry.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Machine entry not found', 404);
+      assertNotDeleted(existing, 'Machine entry');
 
       await inventoryService.validateDeleteMovementsByReference('MachineEntry', existing.id, tx);
       await inventoryService.deleteMovementsByReference('MachineEntry', existing.id, tx);
-      await tx.machineEntry.delete({ where: { id } });
+      return tx.machineEntry.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreMachineEntry(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.machineEntry.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Machine entry');
+
+      await validateOutboundCapacity(
+        STOCK_CATEGORIES.RAW_MATERIAL,
+        { lotNumber: existing.lotNumber },
+        existing.quantitySent,
+        tx,
+        { label: `raw material for lot ${existing.lotNumber}` }
+      );
+
+      const entry = await tx.machineEntry.update({
+        where: { id },
+        data: restorePayload(),
+        include: createdByInclude,
+      });
+
+      await inventoryService.transferRawToWIP(
+        {
+          lotNumber: entry.lotNumber,
+          quantity: entry.quantitySent,
+          referenceId: entry.id,
+          date: entry.date,
+          createdBy: userId || entry.createdById,
+        },
+        tx
+      );
+
+      return entry;
     });
   }
 
   async updateQualityProduction(id, data) {
     return withTransaction(async (tx) => {
       const existing = await tx.qualityProduction.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Quality production not found', 404);
+      assertNotDeleted(existing, 'Quality production');
 
       const lotNumber = data.lotNumber?.trim();
       if (!lotNumber) {
@@ -1039,10 +1214,10 @@ class ManufacturingService {
     });
   }
 
-  async deleteQualityProduction(id) {
+  async deleteQualityProduction(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.qualityProduction.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Quality production not found', 404);
+      assertNotDeleted(existing, 'Quality production');
 
       await inventoryService.validateDeleteMovementsByReference(
         'QualityProduction',
@@ -1050,14 +1225,55 @@ class ManufacturingService {
         tx
       );
       await inventoryService.deleteMovementsByReference('QualityProduction', existing.id, tx);
-      await tx.qualityProduction.delete({ where: { id } });
+      return tx.qualityProduction.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreQualityProduction(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.qualityProduction.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Quality production');
+
+      const totalOutput =
+        existing.quantity6No +
+        existing.quantity5No +
+        existing.quantity4_5No +
+        existing.quantity4No +
+        existing.quantityOthers;
+      await validateWipOutbound(totalOutput, tx, null, null, existing.lotNumber);
+
+      const production = await tx.qualityProduction.update({
+        where: { id },
+        data: restorePayload(),
+        include: createdByInclude,
+      });
+
+      await inventoryService.recordQualityProduction(
+        {
+          lotNumber: production.lotNumber,
+          quantity6No: production.quantity6No,
+          quantity5No: production.quantity5No,
+          quantity4_5No: production.quantity4_5No,
+          quantity4No: production.quantity4No,
+          quantityOthers: production.quantityOthers,
+          referenceId: production.id,
+          date: production.date,
+          createdBy: userId || production.createdById,
+        },
+        tx
+      );
+
+      return production;
     });
   }
 
   async updateFinishedProduction(id, data) {
     return withTransaction(async (tx) => {
       const existing = await tx.finishedProduction.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Finished production not found', 404);
+      assertNotDeleted(existing, 'Finished production');
 
       const lotNumber = data.lotNumber?.trim();
       if (!lotNumber) {
@@ -1163,10 +1379,10 @@ class ManufacturingService {
     });
   }
 
-  async deleteFinishedProduction(id) {
+  async deleteFinishedProduction(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.finishedProduction.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Finished production not found', 404);
+      assertNotDeleted(existing, 'Finished production');
 
       if (existing.remainingQuantity < existing.finishedQuantity) {
         throw new AppError(
@@ -1188,7 +1404,54 @@ class ManufacturingService {
         tx
       );
       await inventoryService.deleteMovementsByReference('FinishedProduction', existing.id, tx);
-      await tx.finishedProduction.delete({ where: { id } });
+      return tx.finishedProduction.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreFinishedProduction(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.finishedProduction.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Finished production');
+
+      await validateFinishedProductionStock(
+        {
+          consumed6No: existing.consumed6No,
+          consumed5No: existing.consumed5No,
+          consumed4_5No: existing.consumed4_5No,
+          consumed4No: existing.consumed4No,
+          consumedOthers: existing.consumedOthers,
+          lotNumber: existing.lotNumber,
+        },
+        tx
+      );
+
+      const production = await tx.finishedProduction.update({
+        where: { id },
+        data: restorePayload(),
+        include: createdByInclude,
+      });
+
+      await inventoryService.recordFinishedProduction(
+        {
+          lotNumber: production.lotNumber,
+          batchId: production.id,
+          finishedQuantity: production.finishedQuantity,
+          consumed6No: production.consumed6No,
+          consumed5No: production.consumed5No,
+          consumed4_5No: production.consumed4_5No,
+          consumed4No: production.consumed4No,
+          consumedOthers: production.consumedOthers,
+          referenceId: production.id,
+          date: production.date,
+          createdBy: userId || production.createdById,
+        },
+        tx
+      );
+
+      return production;
     });
   }
 
@@ -1359,12 +1622,21 @@ class ManufacturingService {
     throw new AppError('Quantity sold must be greater than zero', 400);
   }
 
-  async getManufacturingSales({ search, startDate, endDate, page = 1, limit = 10 }) {
+  async getManufacturingSales({
+    search,
+    startDate,
+    endDate,
+    page = 1,
+    limit = 10,
+    includeDeleted = false,
+    deletedOnly = false,
+  }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const baseWhere = {
       ...buildSearchFilter(search, ['serialNumber', 'customerName']),
       ...(date ? { date } : {}),
     };
+    const where = buildListFilter(baseWhere, { includeDeleted, deletedOnly });
 
     const skip = (page - 1) * limit;
     const [sales, total] = await Promise.all([
@@ -1383,7 +1655,7 @@ class ManufacturingService {
 
   async updateManufacturingSale(id, data) {
     const existing = await prisma.manufacturingSale.findUnique({ where: { id } });
-    if (!existing) throw new AppError('Manufacturing sale not found', 404);
+    assertNotDeleted(existing, 'Manufacturing sale');
 
     if ((existing.saleType || MANUFACTURING_SALE_TYPES.LOOSE) === MANUFACTURING_SALE_TYPES.BRANDED) {
       return this.updateBrandedManufacturingSale(id, data, existing);
@@ -1393,7 +1665,7 @@ class ManufacturingService {
 
     return withTransaction(async (tx) => {
       const existingSale = await tx.manufacturingSale.findUnique({ where: { id } });
-      if (!existingSale) throw new AppError('Manufacturing sale not found', 404);
+      assertNotDeleted(existingSale, 'Manufacturing sale');
 
       const stockUnchanged = sameQty(existingSale.quantity, data.quantity);
 
@@ -1563,10 +1835,10 @@ class ManufacturingService {
     });
   }
 
-  async deleteManufacturingSale(id) {
+  async deleteManufacturingSale(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.manufacturingSale.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Manufacturing sale not found', 404);
+      assertNotDeleted(existing, 'Manufacturing sale');
 
       await inventoryService.validateDeleteMovementsByReference(
         'ManufacturingSale',
@@ -1574,24 +1846,88 @@ class ManufacturingService {
         tx
       );
 
-      const invoice = await tx.invoice.findFirst({
-        where: { manufacturingSaleId: id },
-      });
-      if (invoice) {
-        await tx.invoice.delete({ where: { id: invoice.id } });
-      }
+      await softDeleteInvoice(tx, { manufacturingSaleId: id }, userId, deleteReason);
 
       if ((existing.saleType || MANUFACTURING_SALE_TYPES.LOOSE) === MANUFACTURING_SALE_TYPES.BRANDED) {
         await accountingService.deleteLedgerEntriesByReference('ManufacturingSale', existing.id, tx);
         await inventoryService.deleteMovementsByReference('ManufacturingSale', existing.id, tx);
-        await tx.manufacturingSale.delete({ where: { id } });
-        return;
+        return tx.manufacturingSale.update({
+          where: { id },
+          data: softDeletePayload(userId, deleteReason),
+        });
       }
 
       await fifoAllocationService.reverseAllocations(existing.id, tx);
       await accountingService.deleteLedgerEntriesByReference('ManufacturingSale', existing.id, tx);
       await inventoryService.deleteMovementsByReference('ManufacturingSale', existing.id, tx);
-      await tx.manufacturingSale.delete({ where: { id } });
+      return tx.manufacturingSale.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreManufacturingSale(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.manufacturingSale.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Manufacturing sale');
+
+      if ((existing.saleType || MANUFACTURING_SALE_TYPES.LOOSE) === MANUFACTURING_SALE_TYPES.BRANDED) {
+        await validateOutboundCapacity(
+          STOCK_CATEGORIES.BRANDED_GOODS,
+          { brandId: existing.brandId },
+          existing.packetCount,
+          tx,
+          { label: 'branded stock' }
+        );
+
+        const sale = await tx.manufacturingSale.update({
+          where: { id },
+          data: restorePayload(),
+          include: {
+            ...createdByInclude,
+            brand: { select: { id: true, name: true, packetSizeGrams: true, packingWeightGrams: true } },
+          },
+        });
+
+        await inventoryService.recordBrandedManufacturingSale(
+          {
+            brandId: sale.brandId,
+            packetCount: sale.packetCount,
+            referenceId: sale.id,
+            date: sale.date,
+            createdBy: userId || sale.createdById,
+          },
+          tx
+        );
+        await accountingService.recordManufacturingSale(asAccountingDoc(sale), tx);
+        return sale;
+      }
+
+      await validateFinishedGoodsBatchCapacity(existing.quantity, tx);
+      const allocations = await fifoAllocationService.allocateQuantity(existing.quantity, tx);
+      const costOfGoodsSold = fifoAllocationService.sumAllocationCost(allocations);
+      const sale = await tx.manufacturingSale.update({
+        where: { id },
+        data: { ...restorePayload(), costOfGoodsSold },
+        include: createdByInclude,
+      });
+
+      await fifoAllocationService.persistSaleAllocations(sale.id, allocations, tx);
+      await fifoAllocationService.applyAllocations(allocations, tx);
+      await inventoryService.recordManufacturingSale(
+        {
+          productCategory: sale.productCategory || STOCK_CATEGORIES.FINISHED_GOODS,
+          quantity: sale.quantity,
+          allocations,
+          referenceId: sale.id,
+          date: sale.date,
+          createdBy: userId || sale.createdById,
+        },
+        tx
+      );
+      await accountingService.recordManufacturingSale(asAccountingDoc(sale), tx);
+      return sale;
     });
   }
 }

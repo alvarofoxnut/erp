@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Shield,
   ScrollText,
+  Trash2,
   Warehouse,
   Scale,
   Receipt,
@@ -145,6 +146,8 @@ const navItems = [
       { path: '/roles', label: 'Roles & Permissions', icon: Shield, permission: PERMISSIONS.ROLES_READ },
 
       { path: '/audit-logs', label: 'Audit Logs', icon: ScrollText, adminOnly: true },
+
+      { path: '/deleted-records', label: 'Deleted Records', icon: Trash2, adminOnly: true },
 
     ],
 

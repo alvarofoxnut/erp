@@ -103,7 +103,7 @@ export default function MachineEntry() {
                   <tr key={r._id}>
                     <td>{formatDate(r.date)}</td><td className="font-mono">{r.lotNumber}</td>
                     <td>{formatNumber(r.quantitySent)}</td>
-                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={() => deleteItem(r._id)} deleteTitle="Delete machine entry" editTitle="Edit machine entry" /></td>
+                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete machine entry" editTitle="Edit machine entry" /></td>
                   </tr>
                 ))}
               </tbody>

@@ -6,6 +6,15 @@ import accountingService from '../accounting/accounting.service.js';
 import { STOCK_CATEGORIES } from '../../shared/constants/index.js';
 import { validateOutboundCapacity, buildNetEffectsMap, netInbound, netOutbound } from '../inventory/stockValidation.js';
 import AppError from '../../shared/utils/AppError.js';
+import {
+  ACTIVE_ONLY,
+  buildListFilter,
+  softDeletePayload,
+  restorePayload,
+  assertNotDeleted,
+  assertIsDeleted,
+  softDeleteInvoice,
+} from '../../shared/utils/softDelete.js';
 
 function normalizeItemInput(data = {}) {
   const normalized = { ...data };
@@ -165,10 +174,9 @@ class TradingService {
 
   // Items
   async getItems({ search, startDate, endDate, page = 1, limit = 10 }) {
-    const where = {
-      isActive: true,
+    const where = buildListFilter({
       ...buildSearchFilter(search, ['name', 'sku', 'description']),
-    };
+    });
     const createdAt = buildDateRange(startDate, endDate);
     if (createdAt) where.createdAt = createdAt;
 
@@ -214,11 +222,14 @@ class TradingService {
     }
   }
 
-  async deleteItem(id) {
+  async deleteItem(id, userId, deleteReason) {
     try {
+      const existing = await prisma.item.findUnique({ where: { id } });
+      assertNotDeleted(existing, 'Item');
+
       return await prisma.item.update({
         where: { id },
-        data: { isActive: false },
+        data: softDeletePayload(userId, deleteReason, { deactivate: true }),
       });
     } catch (error) {
       if (error.code === 'P2025') throw new AppError('Item not found', 404);
@@ -228,10 +239,9 @@ class TradingService {
 
   // Parties (vendors for purchases)
   async getParties({ search, type, item, startDate, endDate, page = 1, limit = 10 }) {
-    const where = {
-      isActive: true,
+    const where = buildListFilter({
       ...buildSearchFilter(search, ['name', 'contactPerson', 'phone', 'email']),
-    };
+    });
 
     if (type === 'vendor') where.type = { in: ['vendor', 'both'] };
     else if (type === 'customer') where.type = { in: ['customer', 'both'] };
@@ -309,11 +319,14 @@ class TradingService {
     }
   }
 
-  async deleteParty(id) {
+  async deleteParty(id, userId, deleteReason) {
     try {
+      const existing = await prisma.party.findUnique({ where: { id } });
+      assertNotDeleted(existing, 'Party');
+
       const party = await prisma.party.update({
         where: { id },
-        data: { isActive: false },
+        data: softDeletePayload(userId, deleteReason, { deactivate: true }),
         include: PARTY_LIST_INCLUDE,
       });
       return formatParty(party);
@@ -360,8 +373,9 @@ class TradingService {
         where: { id: data.party },
         include: { suppliedItems: true },
       });
+      assertNotDeleted(party, 'Party');
 
-      if (!party || !['vendor', 'both'].includes(party.type)) {
+      if (!['vendor', 'both'].includes(party.type)) {
         throw new AppError('Selected party must be a vendor', 400);
       }
 
@@ -373,6 +387,7 @@ class TradingService {
       }
 
       const itemDoc = await tx.item.findUnique({ where: { id: data.item } });
+      assertNotDeleted(itemDoc, 'Item');
       const serialNumber = data.serialNumber || (await this.generateSerialNumber('PUR', tx));
 
       const purchase = await tx.purchase.create({
@@ -401,7 +416,7 @@ class TradingService {
   }
 
   async getPurchases({ search, startDate, endDate, party, item, page = 1, limit = 10 }) {
-    const where = {};
+    const where = { ...ACTIVE_ONLY };
 
     if (party) where.partyId = party;
     if (item) where.itemId = item;
@@ -430,9 +445,10 @@ class TradingService {
   // Sales
   async createSale(data, userId) {
     return withTransaction(async (tx) => {
+      const itemDoc = await tx.item.findUnique({ where: { id: data.item } });
+      assertNotDeleted(itemDoc, 'Item');
       await this.validateTradingStock(data.item, data.quantity, tx);
 
-      const itemDoc = await tx.item.findUnique({ where: { id: data.item } });
       const serialNumber = data.serialNumber || (await this.generateSerialNumber('SAL', tx));
 
       const sale = await tx.sale.create({
@@ -457,7 +473,7 @@ class TradingService {
   }
 
   async getSales({ search, startDate, endDate, item, page = 1, limit = 10 }) {
-    const where = {};
+    const where = { ...ACTIVE_ONLY };
 
     if (item) where.itemId = item;
 
@@ -485,12 +501,20 @@ class TradingService {
   async updatePurchase(id, data) {
     return withTransaction(async (tx) => {
       const existing = await tx.purchase.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Purchase not found', 404);
+      assertNotDeleted(existing, 'Purchase');
+      const nextPartyId = data.party ?? existing.partyId;
+      const nextItemId = data.item ?? existing.itemId;
+      const nextQuantity = data.quantity ?? existing.quantity;
+
+      const party = await tx.party.findUnique({ where: { id: nextPartyId } });
+      assertNotDeleted(party, 'Party');
+      const itemDoc = await tx.item.findUnique({ where: { id: nextItemId } });
+      assertNotDeleted(itemDoc, 'Item');
 
       await inventoryService.validateEditStockImpact(
         'Purchase',
         existing.id,
-        this.tradingPurchaseEditEffects(existing, data),
+        this.tradingPurchaseEditEffects(existing, { item: nextItemId, quantity: nextQuantity }),
         tx,
         { label: 'trading stock' }
       );
@@ -504,15 +528,12 @@ class TradingService {
         data: toPurchaseUpdateData(data),
       });
 
-      const party = await tx.party.findUnique({ where: { id: data.party } });
-      const itemDoc = await tx.item.findUnique({ where: { id: data.item } });
-
       await inventoryService.recordTradingPurchase(
         {
-          item: data.item,
-          quantity: data.quantity,
+          item: purchase.itemId,
+          quantity: purchase.quantity,
           referenceId: purchase.id,
-          date: data.date,
+          date: purchase.date,
           createdBy: existing.createdById,
         },
         tx
@@ -528,32 +549,36 @@ class TradingService {
     });
   }
 
-  async deletePurchase(id) {
+  async deletePurchase(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.purchase.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Purchase not found', 404);
-
-      const invoice = await tx.invoice.findUnique({ where: { tradingPurchaseId: id } });
-      if (invoice) {
-        await tx.invoice.delete({ where: { id: invoice.id } });
-      }
+      assertNotDeleted(existing, 'Purchase');
+      await softDeleteInvoice(tx, { tradingPurchaseId: id }, userId, deleteReason);
 
       await inventoryService.validateDeleteMovementsByReference('Purchase', existing.id, tx);
       await accountingService.deleteLedgerEntriesByReference('Purchase', existing.id, tx);
       await inventoryService.deleteMovementsByReference('Purchase', existing.id, tx);
-      await tx.purchase.delete({ where: { id } });
+      await tx.purchase.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
     });
   }
 
   async updateSale(id, data) {
     return withTransaction(async (tx) => {
       const existing = await tx.sale.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Sale not found', 404);
+      assertNotDeleted(existing, 'Sale');
+      const nextItemId = data.item ?? existing.itemId;
+      const nextQuantity = data.quantity ?? existing.quantity;
+
+      const itemDoc = await tx.item.findUnique({ where: { id: nextItemId } });
+      assertNotDeleted(itemDoc, 'Item');
 
       await inventoryService.validateEditStockImpact(
         'Sale',
         existing.id,
-        this.tradingSaleEditEffects(existing, data),
+        this.tradingSaleEditEffects(existing, { item: nextItemId, quantity: nextQuantity }),
         tx,
         { label: 'trading stock' }
       );
@@ -567,14 +592,12 @@ class TradingService {
         data: toSaleUpdateData(data),
       });
 
-      const itemDoc = await tx.item.findUnique({ where: { id: data.item } });
-
       await inventoryService.recordTradingSale(
         {
-          item: data.item,
-          quantity: data.quantity,
+          item: sale.itemId,
+          quantity: sale.quantity,
           referenceId: sale.id,
-          date: data.date,
+          date: sale.date,
           createdBy: existing.createdById,
         },
         tx
@@ -586,21 +609,123 @@ class TradingService {
     });
   }
 
-  async deleteSale(id) {
+  async deleteSale(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.sale.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Sale not found', 404);
+      assertNotDeleted(existing, 'Sale');
 
       await inventoryService.validateDeleteMovementsByReference('Sale', existing.id, tx);
 
-      const invoice = await tx.invoice.findUnique({ where: { tradingSaleId: id } });
-      if (invoice) {
-        await tx.invoice.delete({ where: { id: invoice.id } });
-      }
+      await softDeleteInvoice(tx, { tradingSaleId: id }, userId, deleteReason);
 
       await accountingService.deleteLedgerEntriesByReference('Sale', existing.id, tx);
       await inventoryService.deleteMovementsByReference('Sale', existing.id, tx);
-      await tx.sale.delete({ where: { id } });
+      await tx.sale.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreItem(id) {
+    const existing = await prisma.item.findUnique({ where: { id } });
+    assertIsDeleted(existing, 'Item');
+
+    return prisma.item.update({
+      where: { id },
+      data: restorePayload({ activate: true }),
+    });
+  }
+
+  async restoreParty(id) {
+    const existing = await prisma.party.findUnique({ where: { id } });
+    assertIsDeleted(existing, 'Party');
+
+    const party = await prisma.party.update({
+      where: { id },
+      data: restorePayload({ activate: true }),
+      include: PARTY_LIST_INCLUDE,
+    });
+    return formatParty(party);
+  }
+
+  async restorePurchase(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.purchase.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Purchase');
+
+      const party = await tx.party.findUnique({
+        where: { id: existing.partyId },
+        include: { suppliedItems: true },
+      });
+      assertNotDeleted(party, 'Party');
+      if (!['vendor', 'both'].includes(party.type)) {
+        throw new AppError('Selected party must be a vendor', 400);
+      }
+      if (
+        party.suppliedItems?.length &&
+        !party.suppliedItems.some((link) => link.itemId === existing.itemId)
+      ) {
+        throw new AppError('Selected vendor does not supply this item', 400);
+      }
+
+      const itemDoc = await tx.item.findUnique({ where: { id: existing.itemId } });
+      assertNotDeleted(itemDoc, 'Item');
+
+      const purchase = await tx.purchase.update({
+        where: { id },
+        data: restorePayload(),
+      });
+
+      await inventoryService.recordTradingPurchase(
+        {
+          item: purchase.itemId,
+          quantity: purchase.quantity,
+          referenceId: purchase.id,
+          date: purchase.date,
+          createdBy: userId || purchase.createdById,
+        },
+        tx
+      );
+
+      await accountingService.recordTradingPurchase(
+        purchase,
+        { partyName: party.name, itemName: itemDoc?.name },
+        tx
+      );
+
+      return purchase;
+    });
+  }
+
+  async restoreSale(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.sale.findUnique({ where: { id } });
+      assertIsDeleted(existing, 'Sale');
+
+      const itemDoc = await tx.item.findUnique({ where: { id: existing.itemId } });
+      assertNotDeleted(itemDoc, 'Item');
+      await this.validateTradingStock(existing.itemId, existing.quantity, tx);
+
+      const sale = await tx.sale.update({
+        where: { id },
+        data: restorePayload(),
+      });
+
+      await inventoryService.recordTradingSale(
+        {
+          item: sale.itemId,
+          quantity: sale.quantity,
+          referenceId: sale.id,
+          date: sale.date,
+          createdBy: userId || sale.createdById,
+        },
+        tx
+      );
+
+      await accountingService.recordTradingSale(sale, { itemName: itemDoc?.name }, tx);
+
+      return sale;
     });
   }
 }

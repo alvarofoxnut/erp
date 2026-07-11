@@ -107,6 +107,7 @@ model User {
   permissions  String[]  @default([])
   isActive     Boolean   @default(true)
   refreshToken String?
+  tokenVersion Int       @default(0)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -159,6 +160,10 @@ model Item {
   description String?
   category    String   @default("trading")
   isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  deletedAt   DateTime?
+  deletedById String?
+  deleteReason String?
   createdById String?
   createdBy   User?    @relation("ItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
@@ -184,6 +189,10 @@ model Party {
   gstNumber      String?
   openingBalance Float     @default(0)
   isActive       Boolean   @default(true)
+  isDeleted      Boolean   @default(false)
+  deletedAt      DateTime?
+  deletedById    String?
+  deleteReason   String?
   createdById    String?
   createdBy      User?     @relation("PartyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt      DateTime  @default(now())
@@ -216,6 +225,10 @@ model Purchase {
   quantity     Float
   rate         Float    @default(0)
   amount       Float
+  isDeleted    Boolean  @default(false)
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
   createdById  String?
   createdBy    User?    @relation("PurchaseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
@@ -243,6 +256,10 @@ model Sale {
   quantity           Float
   rate               Float    @default(0)
   amount             Float
+  isDeleted          Boolean  @default(false)
+  deletedAt          DateTime?
+  deletedById        String?
+  deleteReason       String?
   createdById        String?
   createdBy          User?    @relation("SaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt          DateTime @default(now())
@@ -265,6 +282,10 @@ model ManufacturingVendor {
   address       String?
   gstNumber     String?
   isActive      Boolean  @default(true)
+  isDeleted     Boolean  @default(false)
+  deletedAt     DateTime?
+  deletedById   String?
+  deleteReason  String?
   createdById   String?
   createdBy     User?    @relation("MfgVendorCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())
@@ -283,6 +304,10 @@ model RawPurchase {
   purchaseRate Float
   totalAmount  Float
   date         DateTime
+  isDeleted    Boolean  @default(false)
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
   createdById  String?
   createdBy    User?    @relation("RawPurchaseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
@@ -301,6 +326,10 @@ model MachineEntry {
   lotNumber    String
   quantitySent Float
   date         DateTime
+  isDeleted    Boolean  @default(false)
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
   createdById  String?
   createdBy    User?    @relation("MachineEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
@@ -325,6 +354,10 @@ model QualityProduction {
   rate4No         Float    @default(0)
   rateOthers      Float    @default(0)
   totalOutput     Float    @default(0)
+  isDeleted       Boolean  @default(false)
+  deletedAt       DateTime?
+  deletedById     String?
+  deleteReason    String?
   createdById     String?
   createdBy       User?    @relation("QualityProductionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt       DateTime @default(now())
@@ -346,6 +379,10 @@ model Brand {
   packingWeightGrams Float   @default(0)
   packagingPrice    Float    @default(0)
   isActive          Boolean  @default(true)
+  isDeleted         Boolean  @default(false)
+  deletedAt         DateTime?
+  deletedById       String?
+  deleteReason      String?
   createdById     String?
   createdBy       User?    @relation("BrandCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt       DateTime @default(now())
@@ -375,6 +412,10 @@ model PackagingTransaction {
   consumedOthers   Float    @default(0)
   costPerPacket    Float    @default(0)
   remarks          String?
+  isDeleted        Boolean  @default(false)
+  deletedAt        DateTime?
+  deletedById      String?
+  deleteReason     String?
   createdById      String?
   createdBy        User?    @relation("PackagingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now())
@@ -402,6 +443,10 @@ model FinishedProduction {
   consumedOthers    Float          @default(0)
   finishedRate      Float          @default(0)
   finishedValue     Float          @default(0)
+  isDeleted         Boolean        @default(false)
+  deletedAt         DateTime?
+  deletedById       String?
+  deleteReason      String?
   createdById       String?
   createdBy         User?          @relation("FinishedProductionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt         DateTime       @default(now())
@@ -433,6 +478,10 @@ model ManufacturingSale {
   rate              Float                 @default(0)
   amount            Float
   costOfGoodsSold   Float                 @default(0)
+  isDeleted         Boolean               @default(false)
+  deletedAt         DateTime?
+  deletedById       String?
+  deleteReason      String?
   createdById       String?
   createdBy         User?                 @relation("MfgSaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt         DateTime              @default(now())
@@ -469,6 +518,10 @@ model ManufacturingDamage {
   serialNumber String   @unique
   date         DateTime
   totalLoss    Float    @default(0)
+  isDeleted    Boolean  @default(false)
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
   createdById  String?
   createdBy    User?    @relation("MfgDamageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
@@ -504,6 +557,10 @@ model TradingDamage {
   serialNumber String   @unique
   date         DateTime
   totalLoss    Float    @default(0)
+  isDeleted    Boolean  @default(false)
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
   createdById  String?
   createdBy    User?    @relation("TradingDamageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
@@ -616,6 +673,10 @@ model Expense {
   description  String?
   paymentMode  ExpensePaymentMode @default(cash)
   ledgerId     String?
+  isDeleted    Boolean            @default(false)
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
   createdById  String?
   createdBy    User?              @relation("ExpenseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime           @default(now())
@@ -648,6 +709,10 @@ model Invoice {
   paidAmount          Float              @default(0)
   dueAmount           Float              @default(0)
   paymentStatus       PaymentStatus      @default(unpaid)
+  isDeleted           Boolean            @default(false)
+  deletedAt           DateTime?
+  deletedById         String?
+  deleteReason        String?
   createdById         String?
   createdBy           User?              @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt           DateTime           @default(now())

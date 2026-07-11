@@ -156,9 +156,9 @@ export default function BrandedPackagingTab({ lotsQualityStock = [], onRefreshLo
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id, deleteReason) => {
     try {
-      await api.delete(`/manufacturing/packaging/${id}`);
+      await api.delete(`/manufacturing/packaging/${id}`, { data: { deleteReason } });
       toast.success('Packaging transaction deleted');
       fetchData();
       onRefreshLots?.();

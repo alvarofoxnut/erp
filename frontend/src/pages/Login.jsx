@@ -226,9 +226,11 @@ export default function Login() {
               </button>
             </form>
 
-            <p className="mt-6 text-center text-xs text-gray-400 dark:text-gray-500">
-              Demo: admin@makhanaerp.com / admin123
-            </p>
+            {import.meta.env.DEV && (
+              <p className="mt-6 text-center text-xs text-gray-400 dark:text-gray-500">
+                Demo: admin@makhanaerp.com / admin123
+              </p>
+            )}
           </div>
 
           <div className="mt-5 space-y-1 text-center text-xs text-gray-400 dark:text-gray-600">

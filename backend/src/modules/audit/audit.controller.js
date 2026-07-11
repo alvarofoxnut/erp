@@ -19,6 +19,11 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
   successResponse(res, stats, 'Audit dashboard stats fetched');
 });
 
+export const getSecurityEvents = asyncHandler(async (req, res) => {
+  const result = await auditModuleService.getSecurityEvents(req.query);
+  paginatedResponse(res, result.events, result.pagination, 'Security events fetched');
+});
+
 export const getFilterOptions = asyncHandler(async (req, res) => {
   const options = auditModuleService.getFilterOptions();
   successResponse(res, options, 'Filter options fetched');

@@ -106,7 +106,7 @@ export default function ManufacturingVendors() {
                         <Pencil className="h-4 w-4" />
                       </button>
                       <DeleteButton
-                        onDelete={() => deleteItem(v._id)}
+                        onDelete={(reason) => deleteItem(v._id, reason)}
                         title="Delete vendor"
                         message={`Are you sure you want to delete vendor "${v.name}"?`}
                       >

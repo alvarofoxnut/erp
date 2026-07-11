@@ -276,7 +276,7 @@ export default function ManufacturingSales() {
                       <td>
                         <EntryActions
                           onEdit={() => openEdit(r)}
-                          onDelete={() => deleteItem(r._id)}
+                          onDelete={(reason) => deleteItem(r._id, reason)}
                           deleteTitle="Delete manufacturing sale"
                           editTitle="Edit manufacturing sale"
                         />

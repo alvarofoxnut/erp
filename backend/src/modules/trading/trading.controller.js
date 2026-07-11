@@ -4,6 +4,7 @@ import tradingService from './trading.service.js';
 import asyncHandler from '../../shared/utils/asyncHandler.js';
 import { successResponse, paginatedResponse } from '../../shared/utils/apiResponse.js';
 import { buildPagination, buildPaginationMeta } from '../../shared/utils/helpers.js';
+import { getDeleteMeta } from '../../shared/utils/softDelete.js';
 
 export const itemValidation = [
   body('name').trim().notEmpty().withMessage('Item name required'),
@@ -64,7 +65,8 @@ export const updateItem = asyncHandler(async (req, res) => {
 });
 
 export const deleteItem = asyncHandler(async (req, res) => {
-  await tradingService.deleteItem(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await tradingService.deleteItem(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Item deleted');
 });
 
@@ -94,7 +96,8 @@ export const updateParty = asyncHandler(async (req, res) => {
 });
 
 export const deleteParty = asyncHandler(async (req, res) => {
-  await tradingService.deleteParty(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await tradingService.deleteParty(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Party deleted');
 });
 
@@ -116,7 +119,8 @@ export const updatePurchase = asyncHandler(async (req, res) => {
 });
 
 export const deletePurchase = asyncHandler(async (req, res) => {
-  await tradingService.deletePurchase(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await tradingService.deletePurchase(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Purchase deleted');
 });
 
@@ -138,6 +142,7 @@ export const updateSale = asyncHandler(async (req, res) => {
 });
 
 export const deleteSale = asyncHandler(async (req, res) => {
-  await tradingService.deleteSale(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await tradingService.deleteSale(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Sale deleted');
 });

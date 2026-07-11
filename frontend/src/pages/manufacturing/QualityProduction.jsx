@@ -582,7 +582,7 @@ export default function QualityProduction() {
 
                           onEdit={() => openEdit(r)}
 
-                          onDelete={() => deleteItem(r._id)}
+                          onDelete={(reason) => deleteItem(r._id, reason)}
 
                           deleteTitle="Delete quality output"
 

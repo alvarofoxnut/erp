@@ -7,7 +7,9 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 
 import connectDB, { disconnectDB } from './config/db.js';
+import { validateEnv } from './config/validateEnv.js';
 import errorHandler from './shared/middleware/errorHandler.js';
+import { correlationId } from './shared/middleware/correlationId.js';
 import logger from './shared/utils/logger.js';
 
 import authRoutes from './modules/auth/auth.routes.js';
@@ -22,12 +24,15 @@ import damagesRoutes from './modules/damages/damages.routes.js';
 import roleRoutes from './modules/roles/role.routes.js';
 import auditRoutes from './modules/audit/audit.routes.js';
 import importRoutes from './modules/import/import.routes.js';
+import deletedRoutes from './modules/deleted/deletedRecords.routes.js';
 import { seedDefaultRoles } from './config/seedRoles.js';
 import { corsOriginDelegate } from './shared/utils/corsOrigins.js';
 
 dotenv.config();
+validateEnv();
 
 const app = express();
+app.disable('x-powered-by');
 
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
@@ -37,12 +42,20 @@ connectDB().then(async () => {
   await seedDefaultRoles();
 }).catch((err) => logger.error(err.message));
 
-app.use(helmet());
+app.use(correlationId);
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  hsts: process.env.NODE_ENV === 'production'
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+  frameguard: { action: 'deny' },
+}));
 app.use(cors({
   origin: corsOriginDelegate,
   credentials: true,
 }));
-app.use(morgan('dev'));
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -73,6 +86,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/damages', damagesRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/deleted', deletedRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });

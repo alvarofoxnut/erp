@@ -5,6 +5,15 @@ import AppError from '../../shared/utils/AppError.js';
 import { PAYMENT_STATUS } from '../../shared/constants/index.js';
 import { toDateTime } from '../../shared/utils/helpers.js';
 import { normalizeExpenseCategory } from '../../shared/utils/expenseCategory.js';
+import {
+  ACTIVE_ONLY,
+  buildListFilter,
+  softDeletePayload,
+  restorePayload,
+  assertNotDeleted,
+  assertIsDeleted,
+  softDeleteInvoice,
+} from '../../shared/utils/softDelete.js';
 
 function buildDateRange(startDate, endDate) {
   if (!startDate && !endDate) return undefined;
@@ -37,7 +46,7 @@ class AccountingModuleService {
 
   async updateExpense(id, data) {
     const expense = await prisma.expense.findUnique({ where: { id } });
-    if (!expense) throw new AppError('Expense not found', 404);
+    assertNotDeleted(expense, 'Expense');
 
     await accountingService.deleteLedgerEntriesByReference('Expense', expense.id);
     const updateData = { ...data };
@@ -53,16 +62,35 @@ class AccountingModuleService {
     return updated;
   }
 
-  async deleteExpense(id) {
+  async deleteExpense(id, userId, deleteReason) {
     const expense = await prisma.expense.findUnique({ where: { id } });
-    if (!expense) throw new AppError('Expense not found', 404);
+    assertNotDeleted(expense, 'Expense');
 
-    await accountingService.deleteLedgerEntriesByReference('Expense', expense.id);
-    await prisma.expense.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await accountingService.deleteLedgerEntriesByReference('Expense', expense.id, tx);
+      await tx.expense.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreExpense(id) {
+    const expense = await prisma.expense.findUnique({ where: { id } });
+    assertIsDeleted(expense, 'Expense');
+
+    return prisma.$transaction(async (tx) => {
+      const restored = await tx.expense.update({
+        where: { id },
+        data: restorePayload(),
+      });
+      await accountingService.recordExpense(restored, tx);
+      return restored;
+    });
   }
 
   async getExpenses({ businessUnit, type, startDate, endDate, search, page = 1, limit = 10 }) {
-    const where = {};
+    const where = buildListFilter({});
     if (businessUnit) where.businessUnit = businessUnit;
     if (type) where.type = type;
     if (search) where.category = { contains: search, mode: 'insensitive' };
@@ -85,7 +113,7 @@ class AccountingModuleService {
   }
 
   async getExpenseSummary(startDate, endDate) {
-    const where = {};
+    const where = buildListFilter({});
     const dateRange = buildDateRange(startDate, endDate);
     if (dateRange) where.date = dateRange;
 
@@ -105,69 +133,138 @@ class AccountingModuleService {
 
   async generateInvoiceNumber(invoiceType = 'customer') {
     const count = await prisma.invoice.count({
-      where: { invoiceType },
+      where: buildListFilter({ invoiceType }),
     });
     const year = new Date().getFullYear().toString().slice(-2);
     const prefix = invoiceType === 'vendor' ? 'VINV' : 'INV';
     return `${prefix}-${year}-${String(count + 1).padStart(5, '0')}`;
   }
 
-  async createInvoice(data, userId) {
-    const invoiceType = data.invoiceType || 'customer';
+  async getCanonicalInvoiceTotals(links, fallback = {}) {
+    const {
+      tradingSaleId,
+      manufacturingSaleId,
+      tradingPurchaseId,
+      rawPurchaseId,
+    } = links;
 
-    if (data.tradingSale) {
-      const existing = await prisma.invoice.findFirst({
-        where: { tradingSaleId: data.tradingSale },
-      });
-      if (existing) throw new AppError('Invoice already exists for this trading sale', 400);
-      const sale = await prisma.sale.findUnique({ where: { id: data.tradingSale } });
+    if (tradingSaleId) {
+      const sale = await prisma.sale.findUnique({ where: { id: tradingSaleId } });
       if (!sale) throw new AppError('Trading sale not found', 404);
+      return {
+        amount: sale.amount,
+        totalQuantity: sale.quantity,
+        partyName: sale.customerName,
+        partyId: fallback.partyId ?? null,
+      };
     }
-    if (data.manufacturingSale) {
-      const existing = await prisma.invoice.findFirst({
-        where: { manufacturingSaleId: data.manufacturingSale },
-      });
-      if (existing) throw new AppError('Invoice already exists for this manufacturing sale', 400);
+
+    if (manufacturingSaleId) {
       const sale = await prisma.manufacturingSale.findUnique({
-        where: { id: data.manufacturingSale },
+        where: { id: manufacturingSaleId },
       });
       if (!sale) throw new AppError('Manufacturing sale not found', 404);
+      return {
+        amount: sale.amount,
+        totalQuantity: sale.quantity,
+        partyName: sale.customerName,
+        partyId: fallback.partyId ?? null,
+      };
     }
-    if (data.tradingPurchase) {
-      const existing = await prisma.invoice.findFirst({
-        where: { tradingPurchaseId: data.tradingPurchase },
-      });
-      if (existing) throw new AppError('Invoice already exists for this trading purchase', 400);
+
+    if (tradingPurchaseId) {
       const purchase = await prisma.purchase.findUnique({
-        where: { id: data.tradingPurchase },
+        where: { id: tradingPurchaseId },
         include: { party: true },
       });
       if (!purchase) throw new AppError('Trading purchase not found', 404);
-      if (!data.party && purchase.partyId) data.party = purchase.partyId;
-      if (!data.partyName && purchase.party?.name) data.partyName = purchase.party.name;
+      return {
+        amount: purchase.amount,
+        totalQuantity: purchase.quantity,
+        partyName: purchase.party?.name ?? fallback.partyName,
+        partyId: purchase.partyId,
+      };
     }
-    if (data.rawPurchase) {
-      const existing = await prisma.invoice.findFirst({
-        where: { rawPurchaseId: data.rawPurchase },
-      });
-      if (existing) throw new AppError('Invoice already exists for this raw purchase', 400);
+
+    if (rawPurchaseId) {
       const purchase = await prisma.rawPurchase.findUnique({
-        where: { id: data.rawPurchase },
+        where: { id: rawPurchaseId },
         include: { vendor: true },
       });
       if (!purchase) throw new AppError('Raw purchase not found', 404);
-      if (!data.partyName && purchase.vendor?.name) data.partyName = purchase.vendor.name;
+      return {
+        amount: purchase.totalAmount,
+        totalQuantity: purchase.quantity,
+        partyName: purchase.vendor?.name ?? fallback.partyName,
+        partyId: fallback.partyId ?? null,
+      };
+    }
+
+    const itemTotal = fallback.items?.reduce((sum, i) => sum + i.quantity, 0);
+    return {
+      amount: fallback.amount,
+      totalQuantity: itemTotal || fallback.totalQuantity || 0,
+      partyName: fallback.partyName,
+      partyId: fallback.partyId ?? null,
+    };
+  }
+
+  async assertNoDuplicateInvoiceLink(links) {
+    const checks = [
+      ['tradingSaleId', links.tradingSaleId],
+      ['manufacturingSaleId', links.manufacturingSaleId],
+      ['tradingPurchaseId', links.tradingPurchaseId],
+      ['rawPurchaseId', links.rawPurchaseId],
+    ].filter(([, id]) => id);
+
+    for (const [field, id] of checks) {
+      const existing = await prisma.invoice.findFirst({
+        where: buildListFilter({ [field]: id }),
+      });
+      if (existing) throw new AppError('Invoice already exists for this linked record', 400);
+    }
+  }
+
+  async createInvoice(data, userId) {
+    const invoiceType = data.invoiceType || 'customer';
+
+    await this.assertNoDuplicateInvoiceLink({
+      tradingSaleId: data.tradingSale,
+      manufacturingSaleId: data.manufacturingSale,
+      tradingPurchaseId: data.tradingPurchase,
+      rawPurchaseId: data.rawPurchase,
+    });
+
+    const canonical = await this.getCanonicalInvoiceTotals(
+      {
+        tradingSaleId: data.tradingSale,
+        manufacturingSaleId: data.manufacturingSale,
+        tradingPurchaseId: data.tradingPurchase,
+        rawPurchaseId: data.rawPurchase,
+      },
+      {
+        amount: data.amount,
+        totalQuantity: data.totalQuantity,
+        partyName: data.partyName,
+        partyId: data.party ?? data.partyId ?? null,
+        items: data.items,
+      }
+    );
+
+    const amount = canonical.amount;
+    if (amount == null || amount < 0) {
+      throw new AppError('Invoice amount is required', 400);
     }
 
     const invoiceNumber = data.invoiceNumber || (await this.generateInvoiceNumber(invoiceType));
     const paidAmount = data.paidAmount || 0;
-    const dueAmount = data.amount - paidAmount;
+    const dueAmount = amount - paidAmount;
 
     let paymentStatus = PAYMENT_STATUS.UNPAID;
-    if (paidAmount >= data.amount) paymentStatus = PAYMENT_STATUS.PAID;
+    if (paidAmount >= amount) paymentStatus = PAYMENT_STATUS.PAID;
     else if (paidAmount > 0) paymentStatus = PAYMENT_STATUS.PARTIAL;
 
-    const totalQuantity = data.items?.reduce((sum, i) => sum + i.quantity, 0) || data.totalQuantity || 0;
+    const totalQuantity = canonical.totalQuantity;
     const {
       items,
       tradingSale,
@@ -182,9 +279,11 @@ class AccountingModuleService {
     return prisma.invoice.create({
       data: {
         ...rest,
+        amount,
         date: new Date(date),
         invoiceType,
-        partyId: party ?? rest.partyId ?? null,
+        partyName: canonical.partyName ?? rest.partyName,
+        partyId: canonical.partyId ?? party ?? rest.partyId ?? null,
         tradingSaleId: tradingSale ?? null,
         manufacturingSaleId: manufacturingSale ?? null,
         tradingPurchaseId: tradingPurchase ?? null,
@@ -213,7 +312,7 @@ class AccountingModuleService {
   }
 
   async getInvoices({ search, paymentStatus, invoiceType, startDate, endDate, page = 1, limit = 10 }) {
-    const where = {};
+    const where = buildListFilter({});
     if (invoiceType) where.invoiceType = invoiceType;
     if (paymentStatus) where.paymentStatus = paymentStatus;
     if (search) {
@@ -241,8 +340,8 @@ class AccountingModuleService {
   }
 
   async getInvoiceById(id) {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id },
+    const invoice = await prisma.invoice.findFirst({
+      where: buildListFilter({ id }),
       include: {
         items: true,
         party: { select: { id: true, name: true } },
@@ -268,16 +367,29 @@ class AccountingModuleService {
       where: { id },
       include: { items: true },
     });
-    if (!existing) throw new AppError('Invoice not found', 404);
+    assertNotDeleted(existing, 'Invoice');
 
-    const amount = data.amount !== undefined ? data.amount : existing.amount;
+    const canonical = await this.getCanonicalInvoiceTotals(
+      {
+        tradingSaleId: existing.tradingSaleId,
+        manufacturingSaleId: existing.manufacturingSaleId,
+        tradingPurchaseId: existing.tradingPurchaseId,
+        rawPurchaseId: existing.rawPurchaseId,
+      },
+      {
+        amount: data.amount !== undefined ? data.amount : existing.amount,
+        totalQuantity: data.totalQuantity,
+        partyName: data.partyName ?? existing.partyName,
+        partyId: data.party ?? data.partyId ?? existing.partyId,
+        items: data.items,
+      }
+    );
+
+    const amount = canonical.amount;
     const paidAmount = data.paidAmount !== undefined ? data.paidAmount : existing.paidAmount;
     const paymentFields = this.resolvePaymentFields(amount, paidAmount);
 
-    const totalQuantity =
-      data.items?.reduce((sum, item) => sum + item.quantity, 0) ??
-      data.totalQuantity ??
-      existing.totalQuantity;
+    const totalQuantity = canonical.totalQuantity ?? existing.totalQuantity;
 
     const {
       items,
@@ -335,27 +447,55 @@ class AccountingModuleService {
     });
   }
 
-  async deleteInvoice(id) {
+  async deleteInvoice(id, userId, deleteReason) {
     const invoice = await prisma.invoice.findUnique({ where: { id } });
-    if (!invoice) throw new AppError('Invoice not found', 404);
-    await prisma.invoice.delete({ where: { id } });
+    assertNotDeleted(invoice, 'Invoice');
+
+    await prisma.$transaction(async (tx) => {
+      await softDeleteInvoice(tx, { id }, userId, deleteReason);
+    });
+  }
+
+  async restoreInvoice(id) {
+    const invoice = await prisma.invoice.findUnique({ where: { id } });
+    assertIsDeleted(invoice, 'Invoice');
+
+    return prisma.invoice.update({
+      where: { id },
+      data: restorePayload(),
+    });
   }
 
   async updateInvoicePayment(id, { paidAmount }) {
     const invoice = await prisma.invoice.findUnique({ where: { id } });
-    if (!invoice) throw new AppError('Invoice not found', 404);
+    assertNotDeleted(invoice, 'Invoice');
 
-    const paymentFields = this.resolvePaymentFields(invoice.amount, paidAmount);
+    const canonical = await this.getCanonicalInvoiceTotals(
+      {
+        tradingSaleId: invoice.tradingSaleId,
+        manufacturingSaleId: invoice.manufacturingSaleId,
+        tradingPurchaseId: invoice.tradingPurchaseId,
+        rawPurchaseId: invoice.rawPurchaseId,
+      },
+      { amount: invoice.amount, totalQuantity: invoice.totalQuantity }
+    );
+
+    const paymentFields = this.resolvePaymentFields(canonical.amount, paidAmount);
 
     return prisma.invoice.update({
       where: { id },
-      data: paymentFields,
+      data: {
+        amount: canonical.amount,
+        totalQuantity: canonical.totalQuantity,
+        ...paymentFields,
+      },
     });
   }
 
   async getPendingPayments() {
     return prisma.invoice.findMany({
       where: {
+        ...ACTIVE_ONLY,
         paymentStatus: { in: [PAYMENT_STATUS.UNPAID, PAYMENT_STATUS.PARTIAL] },
       },
       orderBy: { date: 'desc' },
@@ -366,11 +506,11 @@ class AccountingModuleService {
   async getUninvoicedSales() {
     const [invoicedTrading, invoicedMfg] = await Promise.all([
       prisma.invoice.findMany({
-        where: { tradingSaleId: { not: null } },
+        where: { ...ACTIVE_ONLY, tradingSaleId: { not: null } },
         select: { tradingSaleId: true },
       }),
       prisma.invoice.findMany({
-        where: { manufacturingSaleId: { not: null } },
+        where: { ...ACTIVE_ONLY, manufacturingSaleId: { not: null } },
         select: { manufacturingSaleId: true },
       }),
     ]);
@@ -398,11 +538,11 @@ class AccountingModuleService {
   async getUninvoicedPurchases() {
     const [invoicedTrading, invoicedRaw] = await Promise.all([
       prisma.invoice.findMany({
-        where: { tradingPurchaseId: { not: null } },
+        where: { ...ACTIVE_ONLY, tradingPurchaseId: { not: null } },
         select: { tradingPurchaseId: true },
       }),
       prisma.invoice.findMany({
-        where: { rawPurchaseId: { not: null } },
+        where: { ...ACTIVE_ONLY, rawPurchaseId: { not: null } },
         select: { rawPurchaseId: true },
       }),
     ]);

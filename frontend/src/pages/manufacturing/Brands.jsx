@@ -198,7 +198,7 @@ export default function Brands() {
                             <button onClick={() => openEdit(b)} className="btn-secondary p-2" title="Edit">
                               <Pencil className="h-4 w-4" />
                             </button>
-                            <DeleteButton onConfirm={() => deleteItem(b._id || b.id)} />
+                            <DeleteButton onDelete={(reason) => deleteItem(b._id || b.id, reason)} />
                           </div>
                         </td>
                       </tr>

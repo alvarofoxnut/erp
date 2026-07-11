@@ -55,9 +55,9 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
     }
   };
 
-  const deleteItem = async (id) => {
+  const deleteItem = async (id, deleteReason) => {
     try {
-      await api.delete(`${endpoint}/${id}`);
+      await api.delete(`${endpoint}/${id}`, { data: { deleteReason } });
       toast.success('Deleted successfully');
       if (notifyStock) notifyStockUpdated();
       fetchData();

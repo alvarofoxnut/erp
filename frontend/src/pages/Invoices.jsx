@@ -410,7 +410,7 @@ export default function Invoices() {
                           <button onClick={() => setPaymentModal(inv)} className="text-primary-600 text-sm hover:underline">Update Payment</button>
                         )}
                         <DeleteButton
-                          onDelete={() => deleteItem(inv._id)}
+                          onDelete={(reason) => deleteItem(inv._id, reason)}
                           title="Delete invoice"
                           message={`Are you sure you want to delete invoice ${inv.invoiceNumber}?`}
                           step2Message="This will remove the invoice from reports. This action cannot be undone."

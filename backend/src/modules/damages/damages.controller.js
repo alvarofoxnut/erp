@@ -3,6 +3,7 @@ import damagesService from './damages.service.js';
 import asyncHandler from '../../shared/utils/asyncHandler.js';
 import { successResponse, paginatedResponse } from '../../shared/utils/apiResponse.js';
 import { buildPagination, buildPaginationMeta } from '../../shared/utils/helpers.js';
+import { getDeleteMeta } from '../../shared/utils/softDelete.js';
 import { MANUFACTURING_DAMAGE_INVENTORY_TYPES } from '../../shared/constants/index.js';
 
 const dateRangeQuery = (req) => ({
@@ -61,7 +62,8 @@ export const updateManufacturingDamage = asyncHandler(async (req, res) => {
 });
 
 export const deleteManufacturingDamage = asyncHandler(async (req, res) => {
-  await damagesService.deleteManufacturingDamage(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await damagesService.deleteManufacturingDamage(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Manufacturing damage deleted');
 });
 
@@ -102,6 +104,7 @@ export const updateTradingDamage = asyncHandler(async (req, res) => {
 });
 
 export const deleteTradingDamage = asyncHandler(async (req, res) => {
-  await damagesService.deleteTradingDamage(req.params.id);
+  const { userId, deleteReason } = getDeleteMeta(req);
+  await damagesService.deleteTradingDamage(req.params.id, userId, deleteReason);
   successResponse(res, null, 'Trading damage deleted');
 });

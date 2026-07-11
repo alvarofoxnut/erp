@@ -31,6 +31,7 @@ import Reports from './pages/Reports';
 import Users from './pages/Users';
 import Roles from './pages/Roles';
 import AuditLogs from './pages/admin/AuditLogs';
+import DeletedRecords from './pages/admin/DeletedRecords';
 import LoadingSpinner from './components/LoadingSpinner';
 import { PERMISSIONS } from './utils/permissions';
 
@@ -41,11 +42,7 @@ function AppRoutes() {
 
   useEffect(() => {
     dispatch(initTheme());
-    if (localStorage.getItem('accessToken')) {
-      dispatch(fetchMe()).finally(() => setInitializing(false));
-    } else {
-      setInitializing(false);
-    }
+    dispatch(fetchMe()).finally(() => setInitializing(false));
   }, [dispatch]);
 
   if (initializing) {
@@ -123,6 +120,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute roles={['admin']}>
               <AuditLogs />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="deleted-records"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <DeletedRecords />
             </ProtectedRoute>
           }
         />

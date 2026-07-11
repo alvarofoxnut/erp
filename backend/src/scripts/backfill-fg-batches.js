@@ -263,7 +263,7 @@ async function main() {
 
 main()
   .catch((err) => {
-    console.error('Backfill failed:', err);
+    console.error('Backfill failed:', err?.message || 'Unknown error');
     process.exit(1);
   })
   .finally(async () => {

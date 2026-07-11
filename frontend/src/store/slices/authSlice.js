@@ -4,7 +4,6 @@ import api from '../../services/api';
 export const login = createAsyncThunk('auth/login', async (credentials, { rejectWithValue }) => {
   try {
     const { data } = await api.post('/auth/login', credentials);
-    localStorage.setItem('accessToken', data.data.accessToken);
     return data.data;
   } catch (err) {
     return rejectWithValue(err.response?.data?.message || 'Login failed');
@@ -24,18 +23,14 @@ export const fetchMe = createAsyncThunk('auth/fetchMe', async (_, { rejectWithVa
 });
 
 export const logout = createAsyncThunk('auth/logout', async () => {
-  try {
-    await api.post('/auth/logout');
-  } finally {
-    localStorage.removeItem('accessToken');
-  }
+  await api.post('/auth/logout');
 });
 
 const authSlice = createSlice({
   name: 'auth',
   initialState: {
     user: null,
-    isAuthenticated: !!localStorage.getItem('accessToken'),
+    isAuthenticated: false,
     loading: false,
     error: null,
   },
@@ -62,7 +57,6 @@ const authSlice = createSlice({
         if (action.payload?.status === 401) {
           state.user = null;
           state.isAuthenticated = false;
-          localStorage.removeItem('accessToken');
         }
       })
       .addCase(logout.fulfilled, (state) => {

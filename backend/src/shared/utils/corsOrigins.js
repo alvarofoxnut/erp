@@ -3,7 +3,11 @@
  * Set ALLOW_VERCEL_PREVIEWS=true to allow any *.vercel.app origin (preview deploys).
  */
 export function getAllowedOrigins() {
-  const raw = process.env.CLIENT_URL || 'http://localhost:5173';
+  const raw = process.env.CLIENT_URL;
+  if (!raw?.trim()) {
+    if (process.env.NODE_ENV === 'production') return [];
+    return ['http://localhost:5173'];
+  }
   return raw.split(',').map((o) => o.trim()).filter(Boolean);
 }
 

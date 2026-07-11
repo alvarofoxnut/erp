@@ -142,7 +142,7 @@ export default function Expenses({ businessUnit = 'manufacturing' }) {
                       <td>
                         <EntryActions
                           onEdit={() => openEdit(e)}
-                          onDelete={() => deleteItem(e._id)}
+                          onDelete={(reason) => deleteItem(e._id, reason)}
                           editTitle="Edit expense"
                           deleteTitle="Delete expense"
                           editMessage="You are about to edit this expense. Ledger entries will be updated."

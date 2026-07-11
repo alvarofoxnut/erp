@@ -66,7 +66,10 @@ class RoleService {
       throw new AppError('Role slug cannot be changed', 400);
     }
 
-    const { slug: _slug, ...updateData } = data;
+    const updateData = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.permissions !== undefined) updateData.permissions = data.permissions;
 
     const updated = await prisma.role.update({
       where: { id },

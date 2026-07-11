@@ -13,6 +13,14 @@ import {
 import AppError from '../../shared/utils/AppError.js';
 import { validateOutboundCapacity } from '../inventory/stockValidation.js';
 import { getFinancialYear } from '../../shared/utils/helpers.js';
+import {
+  ACTIVE_ONLY,
+  buildListFilter,
+  softDeletePayload,
+  restorePayload,
+  assertNotDeleted,
+  assertIsDeleted,
+} from '../../shared/utils/softDelete.js';
 
 const round2 = (n) => Math.round((n || 0) * 100) / 100;
 
@@ -223,11 +231,11 @@ class DamagesService {
 
   async getManufacturingDamages({ search, startDate, endDate, inventoryType, page = 1, limit = 10 }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const where = buildListFilter({
       ...buildSearchFilter(search, ['serialNumber']),
       ...(date ? { date } : {}),
       ...(inventoryType ? { lines: { some: { inventoryType } } } : {}),
-    };
+    });
 
     const skip = (page - 1) * limit;
     const [damages, total] = await Promise.all([
@@ -252,7 +260,7 @@ class DamagesService {
         where: { id },
         include: { lines: true },
       });
-      if (!existing) throw new AppError('Manufacturing damage entry not found', 404);
+      assertNotDeleted(existing, 'Manufacturing damage entry');
 
       const resolvedLines = await resolveManufacturingLines(rawLines, tx);
       await validateResolvedManufacturingLines(resolvedLines, tx, {
@@ -297,19 +305,51 @@ class DamagesService {
     });
   }
 
-  async deleteManufacturingDamage(id) {
+  async deleteManufacturingDamage(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
       const existing = await tx.manufacturingDamage.findUnique({
         where: { id },
         include: { lines: true },
       });
-      if (!existing) throw new AppError('Manufacturing damage entry not found', 404);
+      assertNotDeleted(existing, 'Manufacturing damage entry');
 
       await inventoryService.validateDeleteMovementsByReference('ManufacturingDamage', id, tx);
       await damagesInventoryService.restoreManufacturingLines(existing.lines, tx);
       await accountingService.deleteLedgerEntriesByReference('ManufacturingDamage', id, tx);
       await inventoryService.deleteMovementsByReference('ManufacturingDamage', id, tx);
-      await tx.manufacturingDamage.delete({ where: { id } });
+      await tx.manufacturingDamage.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreManufacturingDamage(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.manufacturingDamage.findUnique({
+        where: { id },
+        include: { lines: true },
+      });
+      assertIsDeleted(existing, 'Manufacturing damage entry');
+
+      await validateResolvedManufacturingLines(existing.lines, tx);
+      const restored = await tx.manufacturingDamage.update({
+        where: { id },
+        data: restorePayload(),
+        include: mfgDamageInclude,
+      });
+
+      for (const line of existing.lines) {
+        await damagesInventoryService.recordManufacturingLine(
+          line,
+          restored,
+          existing.createdById || userId,
+          tx
+        );
+      }
+
+      await accountingService.recordManufacturingDamage(restored, tx);
+      return restored;
     });
   }
 
@@ -347,11 +387,11 @@ class DamagesService {
 
   async getTradingDamages({ search, startDate, endDate, itemId, page = 1, limit = 10 }) {
     const date = buildDateRange(startDate, endDate);
-    const where = {
+    const where = buildListFilter({
       ...buildSearchFilter(search, ['serialNumber']),
       ...(date ? { date } : {}),
       ...(itemId ? { lines: { some: { itemId } } } : {}),
-    };
+    });
 
     const skip = (page - 1) * limit;
     const [damages, total] = await Promise.all([
@@ -376,7 +416,7 @@ class DamagesService {
         where: { id },
         include: { lines: true },
       });
-      if (!existing) throw new AppError('Trading damage entry not found', 404);
+      assertNotDeleted(existing, 'Trading damage entry');
 
       const resolvedLines = await resolveTradingLines(rawLines, tx);
       await validateResolvedTradingLines(resolvedLines, tx, {
@@ -420,25 +460,60 @@ class DamagesService {
     });
   }
 
-  async deleteTradingDamage(id) {
+  async deleteTradingDamage(id, userId, deleteReason) {
     return withTransaction(async (tx) => {
-      const existing = await tx.tradingDamage.findUnique({ where: { id } });
-      if (!existing) throw new AppError('Trading damage entry not found', 404);
+      const existing = await tx.tradingDamage.findUnique({
+        where: { id },
+        include: { lines: true },
+      });
+      assertNotDeleted(existing, 'Trading damage entry');
 
       await inventoryService.validateDeleteMovementsByReference('TradingDamage', id, tx);
       await accountingService.deleteLedgerEntriesByReference('TradingDamage', id, tx);
       await inventoryService.deleteMovementsByReference('TradingDamage', id, tx);
-      await tx.tradingDamage.delete({ where: { id } });
+      await tx.tradingDamage.update({
+        where: { id },
+        data: softDeletePayload(userId, deleteReason),
+      });
+    });
+  }
+
+  async restoreTradingDamage(id, userId) {
+    return withTransaction(async (tx) => {
+      const existing = await tx.tradingDamage.findUnique({
+        where: { id },
+        include: { lines: true },
+      });
+      assertIsDeleted(existing, 'Trading damage entry');
+
+      await validateResolvedTradingLines(existing.lines, tx);
+      const restored = await tx.tradingDamage.update({
+        where: { id },
+        data: restorePayload(),
+        include: tradingDamageInclude,
+      });
+
+      for (const line of existing.lines) {
+        await damagesInventoryService.recordTradingLine(
+          line,
+          restored,
+          existing.createdById || userId,
+          tx
+        );
+      }
+
+      await accountingService.recordTradingDamage(restored, tx);
+      return restored;
     });
   }
 
   async getManufacturingDamageReport(startDate, endDate, inventoryType) {
     const dateFilter = { gte: startDate, lte: endDate };
     const damages = await prisma.manufacturingDamage.findMany({
-      where: {
+      where: buildListFilter({
         date: dateFilter,
         ...(inventoryType ? { lines: { some: { inventoryType } } } : {}),
-      },
+      }),
       include: {
         lines: true,
         createdBy: { select: { name: true } },
@@ -481,10 +556,10 @@ class DamagesService {
   async getTradingDamageReport(startDate, endDate, itemId) {
     const dateFilter = { gte: startDate, lte: endDate };
     const damages = await prisma.tradingDamage.findMany({
-      where: {
+      where: buildListFilter({
         date: dateFilter,
         ...(itemId ? { lines: { some: { itemId } } } : {}),
-      },
+      }),
       include: {
         lines: { include: { item: { select: { name: true } } } },
         createdBy: { select: { name: true } },
@@ -534,31 +609,31 @@ class DamagesService {
       tradingFyLoss,
     ] = await Promise.all([
       prisma.manufacturingDamage.aggregate({
-        where: { date: { gte: todayStart, lte: todayEnd } },
+        where: { ...ACTIVE_ONLY, date: { gte: todayStart, lte: todayEnd } },
         _sum: { totalLoss: true },
         _count: true,
       }),
       prisma.manufacturingDamage.aggregate({
-        where: { date: { gte: monthStart, lte: todayEnd } },
+        where: { ...ACTIVE_ONLY, date: { gte: monthStart, lte: todayEnd } },
         _sum: { totalLoss: true },
         _count: true,
       }),
       prisma.tradingDamage.aggregate({
-        where: { date: { gte: todayStart, lte: todayEnd } },
+        where: { ...ACTIVE_ONLY, date: { gte: todayStart, lte: todayEnd } },
         _sum: { totalLoss: true },
         _count: true,
       }),
       prisma.tradingDamage.aggregate({
-        where: { date: { gte: monthStart, lte: todayEnd } },
+        where: { ...ACTIVE_ONLY, date: { gte: monthStart, lte: todayEnd } },
         _sum: { totalLoss: true },
         _count: true,
       }),
       prisma.manufacturingDamage.aggregate({
-        where: { date: { gte: fy.start, lte: fy.end } },
+        where: { ...ACTIVE_ONLY, date: { gte: fy.start, lte: fy.end } },
         _sum: { totalLoss: true },
       }),
       prisma.tradingDamage.aggregate({
-        where: { date: { gte: fy.start, lte: fy.end } },
+        where: { ...ACTIVE_ONLY, date: { gte: fy.start, lte: fy.end } },
         _sum: { totalLoss: true },
       }),
     ]);
@@ -587,11 +662,11 @@ class DamagesService {
     const dateFilter = { gte: startDate, lte: endDate };
     const [mfg, trading] = await Promise.all([
       prisma.manufacturingDamage.aggregate({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         _sum: { totalLoss: true },
       }),
       prisma.tradingDamage.aggregate({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         _sum: { totalLoss: true },
       }),
     ]);

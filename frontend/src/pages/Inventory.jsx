@@ -74,7 +74,7 @@ export default function Inventory() {
 
   const updateParams = (updates) => setParams((p) => ({ ...p, ...updates }));
 
-  const handleDelete = async () => {
+  const handleDelete = async (deleteReason) => {
     if (!deleteTarget) return;
     const endpoint = DELETE_ENDPOINTS[deleteTarget.referenceType]?.(deleteTarget.referenceId);
     if (!endpoint) {
@@ -82,7 +82,7 @@ export default function Inventory() {
       return;
     }
     try {
-      await api.delete(endpoint);
+      await api.delete(endpoint, { data: { deleteReason } });
       toast.success('Entry deleted and stock recalculated');
       notifyStockUpdated();
       setDeleteTarget(null);
@@ -286,6 +286,7 @@ export default function Inventory() {
         confirmLabel="Delete"
         variant="danger"
         doubleConfirm
+        collectDeleteReason
       />
       <ConfirmDialog
         isOpen={!!editConfirm}

@@ -5,7 +5,14 @@ const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
 
-  logger.error(`${err.message}`, { stack: err.stack, path: req.originalUrl, method: req.method });
+  const correlationId = req.correlationId || 'unknown';
+
+  logger.error(err.message, {
+    correlationId,
+    stack: err.stack,
+    path: req.originalUrl,
+    method: req.method,
+  });
 
   if (err.name === 'ValidationError') {
     const messages = Object.values(err.errors).map((e) => e.message);
@@ -35,13 +42,17 @@ const errorHandler = (err, req, res, next) => {
   }
 
   const statusCode = error.statusCode || 500;
-  const message = error.isOperational ? error.message : 'Internal server error';
+  const isProd = process.env.NODE_ENV === 'production';
+  const message = error.isOperational
+    ? error.message
+    : (isProd ? 'An unexpected error occurred. Please try again.' : 'Internal server error');
 
   res.status(statusCode).json({
     success: false,
     message,
+    correlationId,
     errors: error.errors || null,
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+    ...(!isProd && { stack: err.stack }),
   });
 };
 

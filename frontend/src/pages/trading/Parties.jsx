@@ -98,7 +98,7 @@ export default function Parties() {
                     <td className="flex gap-2">
                       <button onClick={() => openEdit(p)} className="text-blue-600"><Pencil className="h-4 w-4" /></button>
                       <DeleteButton
-                        onDelete={() => deleteItem(p._id)}
+                        onDelete={(reason) => deleteItem(p._id, reason)}
                         title="Delete vendor"
                         message={`Are you sure you want to delete vendor "${p.name}"?`}
                       >

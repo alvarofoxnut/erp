@@ -1,6 +1,10 @@
 node_modules/
 dist/
 .env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
 backend/.dev-postgres/
 *.log
 .DS_Store
