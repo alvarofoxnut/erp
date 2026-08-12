@@ -38,6 +38,9 @@ export const queryKeys = {
   inventorySummary: () => ['inventory', 'summary'],
   inventoryLedger: (params) => ['inventory', 'ledger', params],
   finishedGoodsBatches: () => ['inventory', 'fgBatches'],
+  ledgers: (businessUnit) => ['ledgers', businessUnit],
+  ledgerEntries: (ledgerId, businessUnit, params) =>
+    ['ledgers', businessUnit, 'entries', ledgerId, params],
 };
 
 /** Drop all cached API data (logout / session end). */
@@ -51,5 +54,6 @@ export function invalidateStockRelatedCaches() {
     queryClient.invalidateQueries({ queryKey: ['resource'] }),
     queryClient.invalidateQueries({ queryKey: queryKeys.dashboard() }),
     queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+    queryClient.invalidateQueries({ queryKey: ['ledgers'] }),
   ]);
 }

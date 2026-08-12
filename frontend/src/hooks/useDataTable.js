@@ -78,6 +78,7 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) }),
             queryClient.invalidateQueries({ queryKey: queryKeys.fetchOptions(endpoint) }),
+            queryClient.invalidateQueries({ queryKey: ['ledgers'] }),
           ]);
         }
       } catch {

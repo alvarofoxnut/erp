@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -48,6 +48,13 @@ export default function Inventory() {
   });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editConfirm, setEditConfirm] = useState(null);
+  // Defer FG batches so ledger + summary can win the first network slot
+  const [loadBatches, setLoadBatches] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setLoadBatches(true), 100);
+    return () => clearTimeout(t);
+  }, []);
 
   const summaryQuery = useQuery({
     queryKey: queryKeys.inventorySummary(),
@@ -66,6 +73,7 @@ export default function Inventory() {
       return res.data || [];
     },
     staleTime: STOCK_STALE_MS,
+    enabled: loadBatches,
     placeholderData: (previousData) => previousData,
   });
 
@@ -124,8 +132,8 @@ export default function Inventory() {
     setEditConfirm(null);
   };
 
-  // First visit: wait until we have something to show (summary or ledger)
-  if (!summary && summaryQuery.isLoading && loading) {
+  // Ledger-first: do not block the whole page on summary/batches
+  if (loading && !ledger.length) {
     return <LoadingSpinner className="py-20" />;
   }
 
@@ -146,9 +154,13 @@ export default function Inventory() {
       <PageHeader title="Inventory" subtitle="Stock ledger — edit or delete entries (with confirmation)" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-        {stockCards.map(([key, value]) => (
-          <StatCard key={key} title={STOCK_LABELS[key] || key} value={`${formatNumber(value)} KG`} color="primary" />
-        ))}
+        {summaryQuery.isLoading && !summary ? (
+          <div className="col-span-full flex justify-center py-6"><LoadingSpinner /></div>
+        ) : (
+          stockCards.map(([key, value]) => (
+            <StatCard key={key} title={STOCK_LABELS[key] || key} value={`${formatNumber(value)} KG`} color="primary" />
+          ))
+        )}
       </div>
 
       {fgBatches.length > 0 && (

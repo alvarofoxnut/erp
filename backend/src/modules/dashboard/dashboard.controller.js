@@ -6,10 +6,15 @@ import { ROLES } from '../../shared/constants/index.js';
 
 export const getDashboard = asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-  const data = await dashboardService.getDashboardData();
 
-  if (req.user?.role === ROLES.ADMIN) {
-    data.auditSummary = await auditModuleService.getDashboardStats();
+  const isAdmin = req.user?.role === ROLES.ADMIN;
+  const [data, auditSummary] = await Promise.all([
+    dashboardService.getDashboardData(),
+    isAdmin ? auditModuleService.getDashboardStats() : Promise.resolve(null),
+  ]);
+
+  if (auditSummary) {
+    data.auditSummary = auditSummary;
   }
 
   successResponse(res, data);

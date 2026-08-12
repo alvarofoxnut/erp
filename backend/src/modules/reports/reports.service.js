@@ -467,7 +467,8 @@ class ReportsService {
         where: activeInvoiceWhere({ date: dateFilter }),
         _sum: { amount: true },
       }),
-      // Uninvoiced trading: active sales in range not linked by any active invoice in range
+      // Uninvoiced: active sales not covered by an active invoice in range
+      // (same soft-delete rules as activeInvoiceWhere — orphans do not inflate revenue)
       prisma.$queryRaw`
         SELECT COALESCE(SUM(s.amount), 0)::float AS total
         FROM "Sale" s

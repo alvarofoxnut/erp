@@ -1,9 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { PageHeader, EmptyState, ListPageToolbar } from '../../components/common';
 import { formatCurrency, formatDate, getErrorMessage } from '../../utils/helpers';
+import { queryKeys, LIST_STALE_MS } from '../../lib/queryClient';
 
 const UNIT_LABELS = {
   manufacturing: 'Manufacturing',
@@ -12,35 +14,40 @@ const UNIT_LABELS = {
 
 export default function Ledgers({ businessUnit = 'manufacturing' }) {
   const unitLabel = UNIT_LABELS[businessUnit] || businessUnit;
-  const [ledgers, setLedgers] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [params, setParams] = useState({ startDate: '', endDate: '' });
 
-  const loadLedgers = useCallback(() => {
-    setLoading(true);
-    api.get('/accounting/ledgers', { params: { businessUnit } })
-      .then(({ data }) => setLedgers(data.data || []))
-      .catch((err) => toast.error(getErrorMessage(err)))
-      .finally(() => setLoading(false));
-  }, [businessUnit]);
+  const ledgersQuery = useQuery({
+    queryKey: queryKeys.ledgers(businessUnit),
+    queryFn: async () => {
+      const { data } = await api.get('/accounting/ledgers', { params: { businessUnit } });
+      return data.data || [];
+    },
+    staleTime: LIST_STALE_MS,
+    placeholderData: (previousData) => previousData,
+  });
 
-  useEffect(() => { loadLedgers(); }, [loadLedgers]);
+  const entriesQuery = useQuery({
+    queryKey: queryKeys.ledgerEntries(selected?._id, businessUnit, params),
+    queryFn: async () => {
+      const { data } = await api.get(`/accounting/ledgers/${selected._id}/entries`, {
+        params: {
+          businessUnit,
+          startDate: params.startDate || undefined,
+          endDate: params.endDate || undefined,
+          limit: 200,
+        },
+      });
+      return data.data || [];
+    },
+    enabled: !!selected?._id,
+    staleTime: LIST_STALE_MS,
+    placeholderData: (previousData) => previousData,
+  });
 
-  const loadEntries = (ledger) => {
-    setSelected(ledger);
-    api.get(`/accounting/ledgers/${ledger._id}/entries`, {
-      params: {
-        businessUnit,
-        startDate: params.startDate || undefined,
-        endDate: params.endDate || undefined,
-        limit: 200,
-      },
-    })
-      .then(({ data }) => setEntries(data.data || []))
-      .catch((err) => toast.error(getErrorMessage(err)));
-  };
+  const ledgers = ledgersQuery.data || [];
+  const entries = entriesQuery.data || [];
+  const loading = ledgersQuery.isLoading && !ledgersQuery.data;
 
   const handleExport = async () => {
     try {
@@ -75,6 +82,10 @@ export default function Ledgers({ businessUnit = 'manufacturing' }) {
 
   if (loading) return <LoadingSpinner className="py-20" />;
 
+  if (ledgersQuery.isError && !ledgers.length) {
+    return <div className="py-10 text-center text-red-600">Failed to load ledgers</div>;
+  }
+
   return (
     <div>
       <PageHeader
@@ -102,7 +113,7 @@ export default function Ledgers({ businessUnit = 'manufacturing' }) {
                 <button
                   key={l._id}
                   type="button"
-                  onClick={() => loadEntries(l)}
+                  onClick={() => setSelected(l)}
                   className={`w-full text-left p-3 rounded-lg border transition-colors ${
                     selected?._id === l._id
                       ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
@@ -123,28 +134,32 @@ export default function Ledgers({ businessUnit = 'manufacturing' }) {
             {selected ? `${selected.name} — Entries` : 'Select a ledger'}
           </h3>
           {selected ? (
-            <div className="table-container">
-              <table className="data-table">
-                <thead>
-                  <tr><th>Date</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Narration</th></tr>
-                </thead>
-                <tbody>
-                  {entries.length === 0 ? (
-                    <tr><td colSpan={5}><EmptyState /></td></tr>
-                  ) : (
-                    entries.map((e) => (
-                      <tr key={e._id}>
-                        <td>{formatDate(e.date)}</td>
-                        <td>{e.debit ? formatCurrency(e.debit) : '-'}</td>
-                        <td>{e.credit ? formatCurrency(e.credit) : '-'}</td>
-                        <td className="font-semibold">{formatCurrency(e.balanceAfter)}</td>
-                        <td>{e.narration || '-'}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            entriesQuery.isLoading && !entriesQuery.data ? (
+              <LoadingSpinner className="py-10" />
+            ) : (
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr><th>Date</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Narration</th></tr>
+                  </thead>
+                  <tbody>
+                    {entries.length === 0 ? (
+                      <tr><td colSpan={5}><EmptyState /></td></tr>
+                    ) : (
+                      entries.map((e) => (
+                        <tr key={e._id}>
+                          <td>{formatDate(e.date)}</td>
+                          <td>{e.debit ? formatCurrency(e.debit) : '-'}</td>
+                          <td>{e.credit ? formatCurrency(e.credit) : '-'}</td>
+                          <td className="font-semibold">{formatCurrency(e.balanceAfter)}</td>
+                          <td>{e.narration || '-'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )
           ) : (
             <EmptyState message="Click a ledger to view entries" />
           )}

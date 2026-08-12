@@ -10,8 +10,9 @@ class DashboardService {
   async getDashboardData() {
     const fy = getFinancialYear();
 
-    // Heal orphan invoices before aggregates so revenue/pending match cleaned data
-    await softDeleteOrphanInvoices(prisma);
+    // Numbers already ignore orphans (activeInvoiceWhere / isDeleted filters).
+    // Persist cleanup in the background — do not block TTFB.
+    void softDeleteOrphanInvoices(prisma).catch(() => {});
 
     const [stock, pendingPayments, damageMetrics, profitLoss] = await Promise.all([
       inventoryService.getStockSummaryWithTrading(),

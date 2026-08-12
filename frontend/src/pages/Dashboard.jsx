@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, TrendingUp, DollarSign, AlertCircle, Factory, ShoppingBag, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
@@ -19,6 +20,13 @@ export default function Dashboard() {
     staleTime: STOCK_STALE_MS,
     placeholderData: (previousData) => previousData,
   });
+
+  // Same stock payload as /inventory/summary — warm Inventory cards after Dashboard
+  useEffect(() => {
+    if (data?.stock) {
+      queryClient.setQueryData(queryKeys.inventorySummary(), data.stock);
+    }
+  }, [data, queryClient]);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.dashboard() });
