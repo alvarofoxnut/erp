@@ -369,23 +369,23 @@ class ManufacturingService {
         include: rawPurchaseInclude,
       });
 
-      await inventoryService.recordPurchase(
-        {
-          lotNumber: data.lotNumber,
-          quantity: data.quantity,
-          referenceId: purchase.id,
-          date: data.date,
-          createdBy: userId,
-        },
-        tx
-      );
-
-      const vendor = purchase.vendor;
-      await accountingService.recordRawPurchase(
-        asAccountingDoc(purchase),
-        { vendorName: vendor?.name },
-        tx
-      );
+      await Promise.all([
+        inventoryService.recordPurchase(
+          {
+            lotNumber: data.lotNumber,
+            quantity: data.quantity,
+            referenceId: purchase.id,
+            date: data.date,
+            createdBy: userId,
+          },
+          tx
+        ),
+        accountingService.recordRawPurchase(
+          asAccountingDoc(purchase),
+          { vendorName: purchase.vendor?.name },
+          tx
+        ),
+      ]);
 
       return purchase;
     });

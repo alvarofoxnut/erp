@@ -3,6 +3,7 @@ import AppError from '../../shared/utils/AppError.js';
 import { ALL_PERMISSIONS, ROLES } from '../../shared/constants/index.js';
 import { buildSearchFilter } from '../../shared/utils/query.js';
 import { resolvePermissionsForRole } from '../../shared/utils/permissionResolver.js';
+import { clearSessionCache } from '../../shared/utils/sessionCache.js';
 
 class RoleService {
   async getAll({ search, page = 1, limit = 50 }) {
@@ -78,6 +79,7 @@ class RoleService {
 
     if (data.permissions) {
       await this.syncUsersForRole(updated.slug, updated.permissions);
+      clearSessionCache();
     }
 
     return updated;

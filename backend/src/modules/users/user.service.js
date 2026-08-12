@@ -3,6 +3,7 @@ import AppError from '../../shared/utils/AppError.js';
 import { hashPassword } from '../../shared/utils/password.js';
 import { buildSearchFilter } from '../../shared/utils/query.js';
 import roleService from '../roles/role.service.js';
+import { invalidateSession } from '../../shared/utils/sessionCache.js';
 
 const userPublicOmit = { password: true, refreshToken: true };
 
@@ -90,20 +91,24 @@ class UserService {
       updateData.isActive = data.isActive;
     }
 
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id },
       data: updateData,
       omit: userPublicOmit,
     });
+    invalidateSession(id);
+    return updated;
   }
 
   async delete(id) {
     try {
-      return await prisma.user.update({
+      const updated = await prisma.user.update({
         where: { id },
         data: { isActive: false },
         omit: userPublicOmit,
       });
+      invalidateSession(id);
+      return updated;
     } catch (error) {
       if (error.code === 'P2025') throw new AppError('User not found', 404);
       throw error;

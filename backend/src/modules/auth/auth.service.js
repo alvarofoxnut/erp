@@ -11,6 +11,7 @@ import {
   verifyRefreshToken,
 } from '../../shared/utils/helpers.js';
 import authSecurityService from '../../shared/services/authSecurity.service.js';
+import { invalidateSession, setCachedSession } from '../../shared/utils/sessionCache.js';
 
 const userPublicOmit = { password: true, refreshToken: true };
 
@@ -43,6 +44,7 @@ class AuthService {
       omit: userPublicOmit,
     });
 
+    setCachedSession(userData);
     return { user: userData, accessToken, refreshToken };
   }
 
@@ -67,10 +69,13 @@ class AuthService {
     const newRefreshToken = generateRefreshToken(tokenPayloadFor(user));
     const newRefreshTokenHash = await hashRefreshToken(newRefreshToken);
 
-    await prisma.user.update({
+    const userData = await prisma.user.update({
       where: { id: user.id },
       data: { refreshToken: newRefreshTokenHash },
+      omit: userPublicOmit,
     });
+
+    setCachedSession(userData);
 
     return { accessToken, refreshToken: newRefreshToken };
   }
@@ -83,6 +88,7 @@ class AuthService {
         tokenVersion: { increment: 1 },
       },
     });
+    invalidateSession(userId);
   }
 }
 

@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../services/api';
 import { getErrorMessage } from '../utils/helpers';
 import { notifyStockUpdated } from '../utils/stockEvents';
-import { invalidateDataCaches, queryKeys } from '../lib/queryClient';
+import { queryKeys } from '../lib/queryClient';
 
 async function fetchDataTable(endpoint, params) {
   const { data: res } = await api.get(endpoint, { params });
@@ -63,18 +63,21 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
   }, [queryClient, endpoint, query]);
 
   /**
-   * Revalidate caches after a successful write.
-   * Runs in the background so the modal can close immediately after the API succeeds.
+   * Revalidate only this list (+ stock panels when needed).
+   * Avoids refetching every module after a single save.
    */
   const afterWrite = useCallback(() => {
     const run = async () => {
       try {
         if (notifyStock) {
           notifyStockUpdated();
-          await invalidateDataCaches();
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) }),
+            queryClient.invalidateQueries({ queryKey: ['resource'] }),
+          ]);
         } else {
           await queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) });
-          await queryClient.invalidateQueries({ queryKey: ['fetchOptions'] });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.fetchOptions(endpoint) });
         }
         await query.refetch();
       } catch {

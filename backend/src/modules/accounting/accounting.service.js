@@ -93,11 +93,14 @@ class AccountingService {
       date,
       createdBy,
       businessUnit,
+      ledger: ledgerHint = null,
     },
     tx = null
   ) {
     const client = db(tx);
-    const ledger = await client.ledger.findUnique({ where: { id: ledgerId } });
+    const ledger = ledgerHint?.id === ledgerId
+      ? ledgerHint
+      : await client.ledger.findUnique({ where: { id: ledgerId } });
     if (!ledger) throw new AppError('Ledger not found', 404);
 
     const resolvedUnit =
@@ -110,6 +113,9 @@ class AccountingService {
       where: { id: ledgerId },
       data: { currentBalance: balanceAfter },
     });
+
+    // Keep hint in sync if caller reuses the object for a second entry on same ledger
+    ledger.currentBalance = balanceAfter;
 
     const createdById = createdBy?.id ?? createdBy?._id ?? createdBy ?? null;
 
@@ -177,39 +183,45 @@ class AccountingService {
     const unit = BUSINESS_UNITS.TRADING;
     const purchaseId = entityId(purchase);
     const createdBy = purchase.createdById ?? purchase.createdBy;
-    const cashLedger = await this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx);
-    const purchasesLedger = await this.getOrCreateLedger('Purchases', LEDGER_TYPES.PURCHASES, null, unit, tx);
     const narration = `Trading purchase ${purchase.serialNumber}${itemName ? ` — ${itemName}` : ''}${partyName ? ` from ${partyName}` : ''}`;
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: cashLedger.id,
-        debit: amount,
-        credit: 0,
-        narration,
-        referenceType: 'Purchase',
-        referenceId: purchaseId,
-        date: purchase.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    const [cashLedger, purchasesLedger] = await Promise.all([
+      this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx),
+      this.getOrCreateLedger('Purchases', LEDGER_TYPES.PURCHASES, null, unit, tx),
+    ]);
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: purchasesLedger.id,
-        debit: 0,
-        credit: amount,
-        narration,
-        referenceType: 'Purchase',
-        referenceId: purchaseId,
-        date: purchase.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    await Promise.all([
+      this.createLedgerEntry(
+        {
+          ledgerId: cashLedger.id,
+          debit: amount,
+          credit: 0,
+          narration,
+          referenceType: 'Purchase',
+          referenceId: purchaseId,
+          date: purchase.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: cashLedger,
+        },
+        tx
+      ),
+      this.createLedgerEntry(
+        {
+          ledgerId: purchasesLedger.id,
+          debit: 0,
+          credit: amount,
+          narration,
+          referenceType: 'Purchase',
+          referenceId: purchaseId,
+          date: purchase.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: purchasesLedger,
+        },
+        tx
+      ),
+    ]);
   }
 
   async recordTradingSale(sale, { itemName } = {}, tx = null) {
@@ -219,39 +231,45 @@ class AccountingService {
     const unit = BUSINESS_UNITS.TRADING;
     const saleId = entityId(sale);
     const createdBy = sale.createdById ?? sale.createdBy;
-    const cashLedger = await this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx);
-    const salesLedger = await this.getOrCreateLedger('Sales', LEDGER_TYPES.SALES, null, unit, tx);
     const narration = `Trading sale ${sale.serialNumber}${itemName ? ` — ${itemName}` : ''} to ${sale.customerName || 'Customer'}`;
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: cashLedger.id,
-        debit: 0,
-        credit: amount,
-        narration,
-        referenceType: 'Sale',
-        referenceId: saleId,
-        date: sale.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    const [cashLedger, salesLedger] = await Promise.all([
+      this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx),
+      this.getOrCreateLedger('Sales', LEDGER_TYPES.SALES, null, unit, tx),
+    ]);
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: salesLedger.id,
-        debit: 0,
-        credit: amount,
-        narration,
-        referenceType: 'Sale',
-        referenceId: saleId,
-        date: sale.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    await Promise.all([
+      this.createLedgerEntry(
+        {
+          ledgerId: cashLedger.id,
+          debit: 0,
+          credit: amount,
+          narration,
+          referenceType: 'Sale',
+          referenceId: saleId,
+          date: sale.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: cashLedger,
+        },
+        tx
+      ),
+      this.createLedgerEntry(
+        {
+          ledgerId: salesLedger.id,
+          debit: 0,
+          credit: amount,
+          narration,
+          referenceType: 'Sale',
+          referenceId: saleId,
+          date: sale.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: salesLedger,
+        },
+        tx
+      ),
+    ]);
   }
 
   async recordRawPurchase(purchase, { vendorName } = {}, tx = null) {
@@ -261,39 +279,45 @@ class AccountingService {
     const unit = BUSINESS_UNITS.MANUFACTURING;
     const purchaseId = entityId(purchase);
     const createdBy = purchase.createdById ?? purchase.createdBy;
-    const cashLedger = await this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx);
-    const purchasesLedger = await this.getOrCreateLedger('Purchases', LEDGER_TYPES.PURCHASES, null, unit, tx);
     const narration = `Raw purchase lot ${purchase.lotNumber}${vendorName ? ` — ${vendorName}` : ''}`;
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: cashLedger.id,
-        debit: amount,
-        credit: 0,
-        narration,
-        referenceType: 'RawPurchase',
-        referenceId: purchaseId,
-        date: purchase.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    const [cashLedger, purchasesLedger] = await Promise.all([
+      this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx),
+      this.getOrCreateLedger('Purchases', LEDGER_TYPES.PURCHASES, null, unit, tx),
+    ]);
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: purchasesLedger.id,
-        debit: 0,
-        credit: amount,
-        narration,
-        referenceType: 'RawPurchase',
-        referenceId: purchaseId,
-        date: purchase.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    await Promise.all([
+      this.createLedgerEntry(
+        {
+          ledgerId: cashLedger.id,
+          debit: amount,
+          credit: 0,
+          narration,
+          referenceType: 'RawPurchase',
+          referenceId: purchaseId,
+          date: purchase.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: cashLedger,
+        },
+        tx
+      ),
+      this.createLedgerEntry(
+        {
+          ledgerId: purchasesLedger.id,
+          debit: 0,
+          credit: amount,
+          narration,
+          referenceType: 'RawPurchase',
+          referenceId: purchaseId,
+          date: purchase.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: purchasesLedger,
+        },
+        tx
+      ),
+    ]);
   }
 
   async recordManufacturingSale(sale, tx = null) {
@@ -303,39 +327,45 @@ class AccountingService {
     const unit = BUSINESS_UNITS.MANUFACTURING;
     const saleId = entityId(sale);
     const createdBy = sale.createdById ?? sale.createdBy;
-    const cashLedger = await this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx);
-    const salesLedger = await this.getOrCreateLedger('Sales', LEDGER_TYPES.SALES, null, unit, tx);
     const narration = `Manufacturing sale ${sale.serialNumber} to ${sale.customerName || 'Customer'}`;
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: cashLedger.id,
-        debit: 0,
-        credit: amount,
-        narration,
-        referenceType: 'ManufacturingSale',
-        referenceId: saleId,
-        date: sale.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    const [cashLedger, salesLedger] = await Promise.all([
+      this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx),
+      this.getOrCreateLedger('Sales', LEDGER_TYPES.SALES, null, unit, tx),
+    ]);
 
-    await this.createLedgerEntry(
-      {
-        ledgerId: salesLedger.id,
-        debit: 0,
-        credit: amount,
-        narration,
-        referenceType: 'ManufacturingSale',
-        referenceId: saleId,
-        date: sale.date,
-        createdBy,
-        businessUnit: unit,
-      },
-      tx
-    );
+    await Promise.all([
+      this.createLedgerEntry(
+        {
+          ledgerId: cashLedger.id,
+          debit: 0,
+          credit: amount,
+          narration,
+          referenceType: 'ManufacturingSale',
+          referenceId: saleId,
+          date: sale.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: cashLedger,
+        },
+        tx
+      ),
+      this.createLedgerEntry(
+        {
+          ledgerId: salesLedger.id,
+          debit: 0,
+          credit: amount,
+          narration,
+          referenceType: 'ManufacturingSale',
+          referenceId: saleId,
+          date: sale.date,
+          createdBy,
+          businessUnit: unit,
+          ledger: salesLedger,
+        },
+        tx
+      ),
+    ]);
   }
 
   async recordManufacturingDamage(damage, tx = null) {
