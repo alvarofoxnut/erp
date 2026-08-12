@@ -294,7 +294,9 @@ class PackagingService {
         existing.id,
         tx
       );
-      await inventoryService.deleteMovementsByReference('PackagingTransaction', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('PackagingTransaction', existing.id, tx, {
+        skipValidation: true,
+      });
       return tx.packagingTransaction.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),

@@ -670,18 +670,106 @@ class ManufacturingService {
   }
 
   async getLotsQualityStock() {
-    const lotNumbers = new Set();
-    for (const category of QUALITY_LOT_CATEGORIES) {
-      const lots = await inventoryRepository.getLotsWithBalance(category);
-      lots.forEach(({ lotNumber }) => lotNumbers.add(lotNumber));
+    const balanceRows = await inventoryRepository.getLotBalancesForCategories(QUALITY_LOT_CATEGORIES);
+    if (!balanceRows.length) return [];
+
+    const byLot = new Map();
+    for (const row of balanceRows) {
+      if (!byLot.has(row.lotNumber)) {
+        byLot.set(row.lotNumber, {
+          lotNumber: row.lotNumber,
+          stock6No: 0,
+          stock5No: 0,
+          stock4_5No: 0,
+          stock4No: 0,
+          stockOthers: 0,
+        });
+      }
+      const entry = byLot.get(row.lotNumber);
+      const bal = round2(row.balance);
+      if (row.category === STOCK_CATEGORIES.QUALITY_6NO) entry.stock6No = bal;
+      else if (row.category === STOCK_CATEGORIES.QUALITY_5NO) entry.stock5No = bal;
+      else if (row.category === STOCK_CATEGORIES.QUALITY_4_5NO) entry.stock4_5No = bal;
+      else if (row.category === STOCK_CATEGORIES.QUALITY_4NO) entry.stock4No = bal;
+      else if (row.category === STOCK_CATEGORIES.QUALITY_OTHERS) entry.stockOthers = bal;
+    }
+
+    const lotNumbers = [...byLot.keys()].sort((a, b) => a.localeCompare(b));
+    const productions = await prisma.qualityProduction.findMany({
+      where: { ...ACTIVE_ONLY, lotNumber: { in: lotNumbers } },
+      select: {
+        lotNumber: true,
+        quantity6No: true,
+        quantity5No: true,
+        quantity4_5No: true,
+        quantity4No: true,
+        quantityOthers: true,
+        rate6No: true,
+        rate5No: true,
+        rate4_5No: true,
+        rate4No: true,
+        rateOthers: true,
+      },
+    });
+
+    const ratesByLot = new Map();
+    for (const lotNumber of lotNumbers) {
+      ratesByLot.set(lotNumber, {
+        qty6: 0, val6: 0,
+        qty5: 0, val5: 0,
+        qty4_5: 0, val4_5: 0,
+        qty4: 0, val4: 0,
+        qtyOthers: 0, valOthers: 0,
+      });
+    }
+    for (const row of productions) {
+      const acc = ratesByLot.get(row.lotNumber);
+      if (!acc) continue;
+      if (row.quantity6No > 0) {
+        acc.qty6 += row.quantity6No;
+        acc.val6 += row.quantity6No * row.rate6No;
+      }
+      if (row.quantity5No > 0) {
+        acc.qty5 += row.quantity5No;
+        acc.val5 += row.quantity5No * row.rate5No;
+      }
+      if (row.quantity4_5No > 0) {
+        acc.qty4_5 += row.quantity4_5No;
+        acc.val4_5 += row.quantity4_5No * row.rate4_5No;
+      }
+      if (row.quantity4No > 0) {
+        acc.qty4 += row.quantity4No;
+        acc.val4 += row.quantity4No * row.rate4No;
+      }
+      if (row.quantityOthers > 0) {
+        acc.qtyOthers += row.quantityOthers;
+        acc.valOthers += row.quantityOthers * row.rateOthers;
+      }
     }
 
     const result = [];
-    for (const lotNumber of [...lotNumbers].sort()) {
-      const detail = await this.getLotQualityStock(lotNumber);
-      if (detail.totalStock > 0) {
-        result.push(detail);
-      }
+    for (const lotNumber of lotNumbers) {
+      const stocks = byLot.get(lotNumber);
+      const totalStock = round2(
+        stocks.stock6No + stocks.stock5No + stocks.stock4_5No + stocks.stock4No + stocks.stockOthers
+      );
+      if (totalStock <= 0) continue;
+
+      const acc = ratesByLot.get(lotNumber);
+      result.push({
+        lotNumber,
+        stock6No: stocks.stock6No,
+        stock5No: stocks.stock5No,
+        stock4_5No: stocks.stock4_5No,
+        stock4No: stocks.stock4No,
+        stockOthers: stocks.stockOthers,
+        rate6No: acc.qty6 > 0 ? round2(acc.val6 / acc.qty6) : 0,
+        rate5No: acc.qty5 > 0 ? round2(acc.val5 / acc.qty5) : 0,
+        rate4_5No: acc.qty4_5 > 0 ? round2(acc.val4_5 / acc.qty4_5) : 0,
+        rate4No: acc.qty4 > 0 ? round2(acc.val4 / acc.qty4) : 0,
+        rateOthers: acc.qtyOthers > 0 ? round2(acc.valOthers / acc.qtyOthers) : 0,
+        totalStock,
+      });
     }
     return result;
   }
@@ -853,30 +941,44 @@ class ManufacturingService {
 
   async getProductionTrend(startDate, endDate) {
     const date = buildDateRange(startDate, endDate);
-    const productions = await prisma.qualityProduction.findMany({
-      where: buildListFilter(date ? { date } : {}),
-      select: { date: true, totalOutput: true },
-    });
-
-    const grouped = new Map();
-    for (const row of productions) {
-      const d = new Date(row.date);
-      const month = d.getMonth() + 1;
-      const year = d.getFullYear();
-      const key = `${year}-${month}`;
-      const existing = grouped.get(key) ?? {
-        _id: { month, year },
-        totalOutput: 0,
-        count: 0,
-      };
-      existing.totalOutput += row.totalOutput;
-      existing.count += 1;
-      grouped.set(key, existing);
+    if (!date) {
+      const rows = await prisma.$queryRaw`
+        SELECT
+          EXTRACT(MONTH FROM date)::int AS month,
+          EXTRACT(YEAR FROM date)::int AS year,
+          COALESCE(SUM("totalOutput"), 0)::float AS "totalOutput",
+          COUNT(*)::int AS count
+        FROM "QualityProduction"
+        WHERE "isDeleted" = false
+        GROUP BY year, month
+        ORDER BY year, month
+      `;
+      return rows.map((row) => ({
+        _id: { month: row.month, year: row.year },
+        totalOutput: Number(row.totalOutput),
+        count: Number(row.count),
+      }));
     }
 
-    return [...grouped.values()].sort(
-      (a, b) => a._id.year - b._id.year || a._id.month - b._id.month
-    );
+    const rows = await prisma.$queryRaw`
+      SELECT
+        EXTRACT(MONTH FROM date)::int AS month,
+        EXTRACT(YEAR FROM date)::int AS year,
+        COALESCE(SUM("totalOutput"), 0)::float AS "totalOutput",
+        COUNT(*)::int AS count
+      FROM "QualityProduction"
+      WHERE "isDeleted" = false
+        AND date >= ${date.gte}
+        AND date <= ${date.lte}
+      GROUP BY year, month
+      ORDER BY year, month
+    `;
+
+    return rows.map((row) => ({
+      _id: { month: row.month, year: row.year },
+      totalOutput: Number(row.totalOutput),
+      count: Number(row.count),
+    }));
   }
 
   async getAvailableLots() {
@@ -980,7 +1082,9 @@ class ManufacturingService {
 
       await inventoryService.validateDeleteMovementsByReference('RawPurchase', existing.id, tx);
       await accountingService.deleteLedgerEntriesByReference('RawPurchase', existing.id, tx);
-      await inventoryService.deleteMovementsByReference('RawPurchase', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('RawPurchase', existing.id, tx, {
+        skipValidation: true,
+      });
       return tx.rawPurchase.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),
@@ -1079,7 +1183,9 @@ class ManufacturingService {
       assertNotDeleted(existing, 'Machine entry');
 
       await inventoryService.validateDeleteMovementsByReference('MachineEntry', existing.id, tx);
-      await inventoryService.deleteMovementsByReference('MachineEntry', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('MachineEntry', existing.id, tx, {
+        skipValidation: true,
+      });
       return tx.machineEntry.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),
@@ -1224,7 +1330,9 @@ class ManufacturingService {
         existing.id,
         tx
       );
-      await inventoryService.deleteMovementsByReference('QualityProduction', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('QualityProduction', existing.id, tx, {
+        skipValidation: true,
+      });
       return tx.qualityProduction.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),
@@ -1403,7 +1511,9 @@ class ManufacturingService {
         existing.id,
         tx
       );
-      await inventoryService.deleteMovementsByReference('FinishedProduction', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('FinishedProduction', existing.id, tx, {
+        skipValidation: true,
+      });
       return tx.finishedProduction.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),
@@ -1850,7 +1960,9 @@ class ManufacturingService {
 
       if ((existing.saleType || MANUFACTURING_SALE_TYPES.LOOSE) === MANUFACTURING_SALE_TYPES.BRANDED) {
         await accountingService.deleteLedgerEntriesByReference('ManufacturingSale', existing.id, tx);
-        await inventoryService.deleteMovementsByReference('ManufacturingSale', existing.id, tx);
+        await inventoryService.deleteMovementsByReference('ManufacturingSale', existing.id, tx, {
+          skipValidation: true,
+        });
         return tx.manufacturingSale.update({
           where: { id },
           data: softDeletePayload(userId, deleteReason),
@@ -1859,7 +1971,9 @@ class ManufacturingService {
 
       await fifoAllocationService.reverseAllocations(existing.id, tx);
       await accountingService.deleteLedgerEntriesByReference('ManufacturingSale', existing.id, tx);
-      await inventoryService.deleteMovementsByReference('ManufacturingSale', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('ManufacturingSale', existing.id, tx, {
+        skipValidation: true,
+      });
       return tx.manufacturingSale.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),

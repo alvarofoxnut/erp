@@ -4,6 +4,25 @@ import AppError from './AppError.js';
 export const ACTIVE_ONLY = { isDeleted: false };
 
 /**
+ * Active invoices whose linked sale/purchase (if any) is also not deleted.
+ * Hides orphan invoices left behind when a source was deleted without cascading.
+ */
+export function activeInvoiceWhere(extra = {}) {
+  const { AND: extraAnd, ...rest } = extra;
+  const sourceGuards = [
+    { OR: [{ tradingSaleId: null }, { tradingSale: { isDeleted: false } }] },
+    { OR: [{ manufacturingSaleId: null }, { manufacturingSale: { isDeleted: false } }] },
+    { OR: [{ tradingPurchaseId: null }, { tradingPurchase: { isDeleted: false } }] },
+    { OR: [{ rawPurchaseId: null }, { rawPurchase: { isDeleted: false } }] },
+  ];
+  const and = [
+    ...(Array.isArray(extraAnd) ? extraAnd : extraAnd ? [extraAnd] : []),
+    ...sourceGuards,
+  ];
+  return { ...ACTIVE_ONLY, ...rest, AND: and };
+}
+
+/**
  * Build list query filter based on admin trash view options.
  * @param {object} baseWhere
  * @param {{ deletedOnly?: boolean, includeDeleted?: boolean }} options
@@ -55,6 +74,31 @@ export async function softDeleteInvoice(tx, where, userId, deleteReason) {
     data: softDeletePayload(userId, deleteReason),
   });
   return invoice;
+}
+
+/**
+ * Soft-delete any still-active invoices whose linked sale/purchase is already deleted.
+ * Repairs orphans so dashboard/lists stay consistent after past deletes.
+ */
+export async function softDeleteOrphanInvoices(prismaClient, userId = null, deleteReason = 'Linked record deleted') {
+  const orphans = await prismaClient.invoice.findMany({
+    where: {
+      isDeleted: false,
+      OR: [
+        { tradingSale: { isDeleted: true } },
+        { manufacturingSale: { isDeleted: true } },
+        { tradingPurchase: { isDeleted: true } },
+        { rawPurchase: { isDeleted: true } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (!orphans.length) return 0;
+  await prismaClient.invoice.updateMany({
+    where: { id: { in: orphans.map((o) => o.id) } },
+    data: softDeletePayload(userId, deleteReason),
+  });
+  return orphans.length;
 }
 
 export function getDeleteMeta(req) {

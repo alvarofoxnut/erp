@@ -6,6 +6,7 @@ import tradingAccountService from './tradingAccount.service.js';
 import { getFinancialYear, getDateRange } from '../../shared/utils/helpers.js';
 import ExcelJS from 'exceljs';
 import { STOCK_CATEGORIES } from '../../shared/constants/index.js';
+import { ACTIVE_ONLY, activeInvoiceWhere } from '../../shared/utils/softDelete.js';
 
 class ReportsService {
   resolveDateRange(query) {
@@ -78,12 +79,13 @@ class ReportsService {
 
   async getStockReport() {
     const summary = await inventoryService.getStockSummary();
-    const items = await prisma.item.findMany({ where: { isActive: true } });
-    const tradingStock = [];
-    for (const item of items) {
-      const balance = await inventoryRepository.getCurrentBalance(STOCK_CATEGORIES.TRADING, { item: item.id });
-      tradingStock.push({ itemName: item.name, sku: item.sku, unit: item.unit, balance });
-    }
+    const tradingRows = await inventoryRepository.getTradingStockWithBalances();
+    const tradingStock = tradingRows.map(({ item, balance }) => ({
+      itemName: item.name,
+      sku: item.sku,
+      unit: item.unit,
+      balance,
+    }));
     return { manufacturing: summary, tradingStock };
   }
 
@@ -117,15 +119,15 @@ class ReportsService {
     const dateFilter = { gte: startDate, lte: endDate };
     const [quality, finished, rawPurchases] = await Promise.all([
       prisma.qualityProduction.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         orderBy: { date: 'desc' },
       }),
       prisma.finishedProduction.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         orderBy: { date: 'desc' },
       }),
       prisma.rawPurchase.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { vendor: { select: { name: true } } },
         orderBy: { date: 'desc' },
       }),
@@ -137,16 +139,16 @@ class ReportsService {
     const dateFilter = { gte: startDate, lte: endDate };
     const [tradingSales, manufacturingSales, invoices] = await Promise.all([
       prisma.sale.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { item: true },
         orderBy: { date: 'desc' },
       }),
       prisma.manufacturingSale.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         orderBy: { date: 'desc' },
       }),
       prisma.invoice.findMany({
-        where: { date: dateFilter },
+        where: activeInvoiceWhere({ date: dateFilter }),
         orderBy: { date: 'desc' },
       }),
     ]);
@@ -160,12 +162,12 @@ class ReportsService {
     const dateFilter = { gte: startDate, lte: endDate };
     const [tradingPurchases, rawPurchases] = await Promise.all([
       prisma.purchase.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { party: true, item: true },
         orderBy: { date: 'desc' },
       }),
       prisma.rawPurchase.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { vendor: { select: { name: true } } },
         orderBy: { date: 'desc' },
       }),
@@ -222,12 +224,12 @@ class ReportsService {
 
     const [rawPurchases, tradingPurchases] = await Promise.all([
       prisma.rawPurchase.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { vendor: true, invoice: true },
         orderBy: { date: 'desc' },
       }),
       prisma.purchase.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { party: true, item: true, invoice: true },
         orderBy: { date: 'desc' },
       }),
@@ -274,17 +276,17 @@ class ReportsService {
 
     const [tradingSales, manufacturingSales, customerInvoices] = await Promise.all([
       prisma.sale.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { item: true, invoice: true },
         orderBy: { date: 'desc' },
       }),
       prisma.manufacturingSale.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         include: { invoice: true },
         orderBy: { date: 'desc' },
       }),
       prisma.invoice.findMany({
-        where: { date: dateFilter, invoiceType: 'customer' },
+        where: activeInvoiceWhere({ date: dateFilter, invoiceType: 'customer' }),
         include: {
           party: true,
           items: true,
@@ -400,7 +402,7 @@ class ReportsService {
 
   async getExpenseReport(startDate, endDate) {
     const expenses = await prisma.expense.findMany({
-      where: { date: { gte: startDate, lte: endDate } },
+      where: { ...ACTIVE_ONLY, date: { gte: startDate, lte: endDate } },
       orderBy: { date: 'desc' },
     });
 
@@ -433,25 +435,97 @@ class ReportsService {
     };
   }
 
-  async getProfitLossReport(startDate, endDate) {
-    const salesReport = await this.getSalesReport(startDate, endDate);
-    const purchaseReport = await this.getPurchaseReport(startDate, endDate);
-    const expenses = await prisma.expense.findMany({
-      where: { date: { gte: startDate, lte: endDate } },
-    });
+  /**
+   * Aggregate-only P&L (no full sale/purchase row loads).
+   * Revenue matches calculateTotalRevenue: invoice totals + uninvoiced sales in range.
+   * Soft-deleted sales/purchases/invoices/expenses are excluded.
+   * @param {{ totalDamageLoss?: number }} [options] - pass FY damage total to skip a duplicate damage query
+   */
+  async getProfitLossAggregates(startDate, endDate, options = {}) {
+    const dateFilter = { gte: startDate, lte: endDate };
+    const activeDate = { ...ACTIVE_ONLY, date: dateFilter };
 
-    const totalRevenue = salesReport.totalSales;
-    const totalPurchases = purchaseReport.totalPurchases;
-    const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-    const totalDamageLoss = await damagesService.getTotalDamageLoss(startDate, endDate);
+    const [
+      tradingSalesAgg,
+      manufacturingSalesAgg,
+      invoiceAgg,
+      uninvoicedTradingRows,
+      uninvoicedMfgRows,
+      tradingPurchasesAgg,
+      rawPurchasesAgg,
+      expenseBreakdown,
+      fetchedDamageLoss,
+    ] = await Promise.all([
+      prisma.sale.aggregate({
+        where: activeDate,
+        _sum: { amount: true },
+      }),
+      prisma.manufacturingSale.aggregate({
+        where: activeDate,
+        _sum: { amount: true },
+      }),
+      prisma.invoice.aggregate({
+        where: activeInvoiceWhere({ date: dateFilter }),
+        _sum: { amount: true },
+      }),
+      // Uninvoiced trading: active sales in range not linked by any active invoice in range
+      prisma.$queryRaw`
+        SELECT COALESCE(SUM(s.amount), 0)::float AS total
+        FROM "Sale" s
+        WHERE s.date >= ${startDate} AND s.date <= ${endDate}
+          AND s."isDeleted" = false
+          AND NOT EXISTS (
+            SELECT 1 FROM "Invoice" i
+            WHERE i."tradingSaleId" = s.id
+              AND i."isDeleted" = false
+              AND i.date >= ${startDate} AND i.date <= ${endDate}
+          )
+      `,
+      prisma.$queryRaw`
+        SELECT COALESCE(SUM(s.amount), 0)::float AS total
+        FROM "ManufacturingSale" s
+        WHERE s.date >= ${startDate} AND s.date <= ${endDate}
+          AND s."isDeleted" = false
+          AND NOT EXISTS (
+            SELECT 1 FROM "Invoice" i
+            WHERE i."manufacturingSaleId" = s.id
+              AND i."isDeleted" = false
+              AND i.date >= ${startDate} AND i.date <= ${endDate}
+          )
+      `,
+      prisma.purchase.aggregate({
+        where: activeDate,
+        _sum: { amount: true },
+      }),
+      prisma.rawPurchase.aggregate({
+        where: activeDate,
+        _sum: { totalAmount: true },
+      }),
+      prisma.expense.groupBy({
+        by: ['type'],
+        where: activeDate,
+        _sum: { amount: true },
+      }),
+      options.totalDamageLoss != null
+        ? Promise.resolve(options.totalDamageLoss)
+        : damagesService.getTotalDamageLoss(startDate, endDate),
+    ]);
+
+    const tradingSales = tradingSalesAgg._sum.amount || 0;
+    const manufacturingSales = manufacturingSalesAgg._sum.amount || 0;
+    const invoiceSales = invoiceAgg._sum.amount || 0;
+    const uninvoicedTrading = Number(uninvoicedTradingRows[0]?.total ?? 0);
+    const uninvoicedMfg = Number(uninvoicedMfgRows[0]?.total ?? 0);
+    const totalRevenue = uninvoicedTrading + uninvoicedMfg + invoiceSales;
+    const totalPurchases =
+      (tradingPurchasesAgg._sum.amount || 0) + (rawPurchasesAgg._sum.totalAmount || 0);
+    const totalExpenses = expenseBreakdown.reduce(
+      (sum, row) => sum + (row._sum.amount ?? 0),
+      0
+    );
+    const totalDamageLoss = Number(fetchedDamageLoss) || 0;
     const grossProfit = totalRevenue - totalPurchases;
     const netProfit = grossProfit - totalExpenses - totalDamageLoss;
-
-    const breakdown = await prisma.expense.groupBy({
-      by: ['type'],
-      where: { date: { gte: startDate, lte: endDate } },
-      _sum: { amount: true },
-    });
 
     return {
       totalRevenue,
@@ -460,10 +534,37 @@ class ReportsService {
       totalDamageLoss,
       grossProfit,
       netProfit,
-      expenseBreakdown: breakdown.map((row) => ({
+      expenseBreakdown: expenseBreakdown.map((row) => ({
         _id: row.type,
         total: row._sum.amount ?? 0,
       })),
+      salesBreakdown: {
+        tradingSales,
+        manufacturingSales,
+        invoiceSales,
+      },
+    };
+  }
+
+  async getProfitLossReport(startDate, endDate) {
+    const {
+      totalRevenue,
+      totalPurchases,
+      totalExpenses,
+      totalDamageLoss,
+      grossProfit,
+      netProfit,
+      expenseBreakdown,
+    } = await this.getProfitLossAggregates(startDate, endDate);
+
+    return {
+      totalRevenue,
+      totalPurchases,
+      totalExpenses,
+      totalDamageLoss,
+      grossProfit,
+      netProfit,
+      expenseBreakdown,
     };
   }
 

@@ -58,34 +58,33 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
   }, []);
 
   const fetchData = useCallback(async () => {
+    // invalidate alone refetches active queries — do not also call refetch()
     await queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) });
-    return query.refetch();
-  }, [queryClient, endpoint, query]);
+  }, [queryClient, endpoint]);
 
   /**
    * Revalidate only this list (+ stock panels when needed).
-   * Avoids refetching every module after a single save.
+   * Stock panels: notifyStockUpdated → QueryCacheSync invalidates ['resource'].
+   * invalidateQueries already refetches active observers (no extra refetch).
    */
   const afterWrite = useCallback(() => {
     const run = async () => {
       try {
         if (notifyStock) {
           notifyStockUpdated();
+          await queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) });
+        } else {
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) }),
-            queryClient.invalidateQueries({ queryKey: ['resource'] }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.fetchOptions(endpoint) }),
           ]);
-        } else {
-          await queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) });
-          await queryClient.invalidateQueries({ queryKey: queryKeys.fetchOptions(endpoint) });
         }
-        await query.refetch();
       } catch {
         // List will refresh on next mount/focus; write already succeeded on server
       }
     };
     void run();
-  }, [notifyStock, queryClient, endpoint, query]);
+  }, [notifyStock, queryClient, endpoint]);
 
   const withWriteLock = async (fn) => {
     if (writeLockRef.current) return false;

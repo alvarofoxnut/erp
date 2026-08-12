@@ -6,69 +6,64 @@ import accountingModuleService from '../accounting/accountingModule.service.js';
 import reportsService from '../reports/reports.service.js';
 import damagesService from '../damages/damages.service.js';
 import { getFinancialYear } from '../../shared/utils/helpers.js';
-import { STOCK_CATEGORIES } from '../../shared/constants/index.js';
+import { softDeleteOrphanInvoices } from '../../shared/utils/softDelete.js';
 
 class DashboardService {
   async getTradingStockSummary() {
-    const items = await prisma.item.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
-    const tradingStock = [];
-    for (const item of items) {
-      const balance = await inventoryRepository.getCurrentBalance(STOCK_CATEGORIES.TRADING, { item: item.id });
-      tradingStock.push({ item, balance });
-    }
-    return tradingStock;
+    return inventoryRepository.getTradingStockWithBalances();
   }
 
   async getDashboardData() {
     const fy = getFinancialYear();
-    const stockSummary = await inventoryService.getStockSummary();
-    const tradingStock = await this.getTradingStockSummary();
-    const expenseSummary = await accountingModuleService.getExpenseSummary(fy.start, fy.end);
-    const pendingPayments = await accountingModuleService.getPendingPayments();
-    const profitLoss = await reportsService.getProfitLossReport(fy.start, fy.end);
-    const damageMetrics = await damagesService.getDamageDashboardMetrics();
 
-    const monthlySales = await this.getMonthlySales(fy.start, fy.end);
-    const productionTrend = await manufacturingService.getProductionTrend(fy.start, fy.end);
-    const inventoryTrend = await inventoryService.getInventoryTrend(fy.start, fy.end);
+    // Soft-delete invoices whose linked sale/purchase was already deleted
+    await softDeleteOrphanInvoices(prisma);
 
-    const [salesTotal, manufacturingSalesTotal, invoiceTotal] = await Promise.all([
-      prisma.sale.aggregate({
-        where: { date: { gte: fy.start, lte: fy.end } },
-        _sum: { amount: true },
-      }),
-      prisma.manufacturingSale.aggregate({
-        where: { date: { gte: fy.start, lte: fy.end } },
-        _sum: { amount: true },
-      }),
-      prisma.invoice.aggregate({
-        where: { date: { gte: fy.start, lte: fy.end } },
-        _sum: { amount: true },
-      }),
+    // Independent blocks in parallel — one warehouse trip, not a single-file line.
+    // P&L uses totalDamageLoss: 0 here; net profit is corrected with damageMetrics below
+    // so we do not wait on (or re-query) FY damage.
+    const [
+      stockSummary,
+      tradingStock,
+      pendingPayments,
+      damageMetrics,
+      monthlySales,
+      productionTrend,
+      profitLoss,
+    ] = await Promise.all([
+      inventoryService.getStockSummary(),
+      this.getTradingStockSummary(),
+      accountingModuleService.getPendingPayments(),
+      damagesService.getDamageDashboardMetrics(),
+      this.getMonthlySales(fy.start, fy.end),
+      manufacturingService.getProductionTrend(fy.start, fy.end),
+      reportsService.getProfitLossAggregates(fy.start, fy.end, { totalDamageLoss: 0 }),
     ]);
+
+    const totalDamageLoss = damageMetrics.totalDamageLoss || 0;
+    const netProfit =
+      profitLoss.grossProfit - profitLoss.totalExpenses - totalDamageLoss;
 
     return {
       stock: { ...stockSummary, tradingStock },
       salesSummary: {
-        tradingSales: salesTotal._sum.amount || 0,
-        manufacturingSales: manufacturingSalesTotal._sum.amount || 0,
-        invoiceSales: invoiceTotal._sum.amount || 0,
+        tradingSales: profitLoss.salesBreakdown.tradingSales,
+        manufacturingSales: profitLoss.salesBreakdown.manufacturingSales,
+        invoiceSales: profitLoss.salesBreakdown.invoiceSales,
         total: profitLoss.totalRevenue,
       },
-      expenseSummary,
       profitSummary: {
         grossProfit: profitLoss.grossProfit,
-        netProfit: profitLoss.netProfit,
+        netProfit,
         totalRevenue: profitLoss.totalRevenue,
         totalExpenses: profitLoss.totalExpenses,
-        totalDamageLoss: profitLoss.totalDamageLoss,
+        totalDamageLoss,
       },
       damageSummary: damageMetrics,
       pendingPayments,
       charts: {
         monthlySales,
         productionTrend,
-        inventoryTrend,
       },
     };
   }
@@ -82,6 +77,7 @@ class DashboardService {
           COALESCE(SUM(amount), 0)::float AS total
         FROM "Sale"
         WHERE date >= ${startDate} AND date <= ${endDate}
+          AND "isDeleted" = false
         GROUP BY year, month
         ORDER BY year, month
       `,
@@ -92,6 +88,7 @@ class DashboardService {
           COALESCE(SUM(amount), 0)::float AS total
         FROM "ManufacturingSale"
         WHERE date >= ${startDate} AND date <= ${endDate}
+          AND "isDeleted" = false
         GROUP BY year, month
         ORDER BY year, month
       `,
@@ -102,6 +99,7 @@ class DashboardService {
           COALESCE(SUM(amount), 0)::float AS total
         FROM "Invoice"
         WHERE date >= ${startDate} AND date <= ${endDate}
+          AND "isDeleted" = false
         GROUP BY year, month
         ORDER BY year, month
       `,

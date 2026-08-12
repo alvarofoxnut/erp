@@ -7,13 +7,16 @@ import { toDateTime } from '../../shared/utils/helpers.js';
 import { normalizeExpenseCategory } from '../../shared/utils/expenseCategory.js';
 import {
   ACTIVE_ONLY,
+  activeInvoiceWhere,
   buildListFilter,
   softDeletePayload,
   restorePayload,
   assertNotDeleted,
   assertIsDeleted,
   softDeleteInvoice,
+  softDeleteOrphanInvoices,
 } from '../../shared/utils/softDelete.js';
+import { withTransaction } from '../../shared/utils/transaction.js';
 
 function buildDateRange(startDate, endDate) {
   if (!startDate && !endDate) return undefined;
@@ -66,7 +69,7 @@ class AccountingModuleService {
     const expense = await prisma.expense.findUnique({ where: { id } });
     assertNotDeleted(expense, 'Expense');
 
-    await prisma.$transaction(async (tx) => {
+    await withTransaction(async (tx) => {
       await accountingService.deleteLedgerEntriesByReference('Expense', expense.id, tx);
       await tx.expense.update({
         where: { id },
@@ -79,7 +82,7 @@ class AccountingModuleService {
     const expense = await prisma.expense.findUnique({ where: { id } });
     assertIsDeleted(expense, 'Expense');
 
-    return prisma.$transaction(async (tx) => {
+    return withTransaction(async (tx) => {
       const restored = await tx.expense.update({
         where: { id },
         data: restorePayload(),
@@ -312,7 +315,10 @@ class AccountingModuleService {
   }
 
   async getInvoices({ search, paymentStatus, invoiceType, startDate, endDate, page = 1, limit = 10 }) {
-    const where = buildListFilter({});
+    // Repair orphans from older deletes where invoice was not cascaded
+    await softDeleteOrphanInvoices(prisma);
+
+    const where = activeInvoiceWhere();
     if (invoiceType) where.invoiceType = invoiceType;
     if (paymentStatus) where.paymentStatus = paymentStatus;
     if (search) {
@@ -403,7 +409,7 @@ class AccountingModuleService {
       ...rest
     } = data;
 
-    return prisma.$transaction(async (tx) => {
+    return withTransaction(async (tx) => {
       if (items) {
         await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
       }
@@ -451,7 +457,7 @@ class AccountingModuleService {
     const invoice = await prisma.invoice.findUnique({ where: { id } });
     assertNotDeleted(invoice, 'Invoice');
 
-    await prisma.$transaction(async (tx) => {
+    await withTransaction(async (tx) => {
       await softDeleteInvoice(tx, { id }, userId, deleteReason);
     });
   }
@@ -493,11 +499,11 @@ class AccountingModuleService {
   }
 
   async getPendingPayments() {
+    await softDeleteOrphanInvoices(prisma);
     return prisma.invoice.findMany({
-      where: {
-        ...ACTIVE_ONLY,
+      where: activeInvoiceWhere({
         paymentStatus: { in: [PAYMENT_STATUS.UNPAID, PAYMENT_STATUS.PARTIAL] },
-      },
+      }),
       orderBy: { date: 'desc' },
       take: 20,
     });
@@ -506,11 +512,11 @@ class AccountingModuleService {
   async getUninvoicedSales() {
     const [invoicedTrading, invoicedMfg] = await Promise.all([
       prisma.invoice.findMany({
-        where: { ...ACTIVE_ONLY, tradingSaleId: { not: null } },
+        where: activeInvoiceWhere({ tradingSaleId: { not: null } }),
         select: { tradingSaleId: true },
       }),
       prisma.invoice.findMany({
-        where: { ...ACTIVE_ONLY, manufacturingSaleId: { not: null } },
+        where: activeInvoiceWhere({ manufacturingSaleId: { not: null } }),
         select: { manufacturingSaleId: true },
       }),
     ]);
@@ -520,13 +526,19 @@ class AccountingModuleService {
 
     const [tradingSales, manufacturingSales] = await Promise.all([
       prisma.sale.findMany({
-        where: { id: { notIn: invoicedTradingIds } },
+        where: {
+          ...ACTIVE_ONLY,
+          ...(invoicedTradingIds.length ? { id: { notIn: invoicedTradingIds } } : {}),
+        },
         include: { item: { select: { name: true, unit: true } } },
         orderBy: { date: 'desc' },
         take: 100,
       }),
       prisma.manufacturingSale.findMany({
-        where: { id: { notIn: invoicedMfgIds } },
+        where: {
+          ...ACTIVE_ONLY,
+          ...(invoicedMfgIds.length ? { id: { notIn: invoicedMfgIds } } : {}),
+        },
         orderBy: { date: 'desc' },
         take: 100,
       }),
@@ -538,11 +550,11 @@ class AccountingModuleService {
   async getUninvoicedPurchases() {
     const [invoicedTrading, invoicedRaw] = await Promise.all([
       prisma.invoice.findMany({
-        where: { ...ACTIVE_ONLY, tradingPurchaseId: { not: null } },
+        where: activeInvoiceWhere({ tradingPurchaseId: { not: null } }),
         select: { tradingPurchaseId: true },
       }),
       prisma.invoice.findMany({
-        where: { ...ACTIVE_ONLY, rawPurchaseId: { not: null } },
+        where: activeInvoiceWhere({ rawPurchaseId: { not: null } }),
         select: { rawPurchaseId: true },
       }),
     ]);
@@ -552,7 +564,10 @@ class AccountingModuleService {
 
     const [tradingPurchases, rawPurchases] = await Promise.all([
       prisma.purchase.findMany({
-        where: { id: { notIn: invoicedTradingIds } },
+        where: {
+          ...ACTIVE_ONLY,
+          ...(invoicedTradingIds.length ? { id: { notIn: invoicedTradingIds } } : {}),
+        },
         include: {
           party: { select: { id: true, name: true, phone: true, email: true, address: true } },
           item: { select: { name: true, unit: true } },
@@ -561,7 +576,10 @@ class AccountingModuleService {
         take: 100,
       }),
       prisma.rawPurchase.findMany({
-        where: { id: { notIn: invoicedRawIds } },
+        where: {
+          ...ACTIVE_ONLY,
+          ...(invoicedRawIds.length ? { id: { notIn: invoicedRawIds } } : {}),
+        },
         include: {
           vendor: { select: { id: true, name: true, phone: true, email: true, address: true } },
         },

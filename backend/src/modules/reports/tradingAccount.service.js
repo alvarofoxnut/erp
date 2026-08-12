@@ -3,6 +3,7 @@ import inventoryValuationService from '../inventory/inventoryValuation.service.j
 import { getReportStockDates } from '../../shared/utils/stockDates.js';
 import { groupExpensesByCategory, mergeExpenseCategoryItems } from '../../shared/utils/expenseCategory.js';
 import { STOCK_CATEGORIES, EXPENSE_TYPES, BUSINESS_UNITS } from '../../shared/constants/index.js';
+import { ACTIVE_ONLY, activeInvoiceWhere } from '../../shared/utils/softDelete.js';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 
@@ -164,7 +165,7 @@ class TradingAccountService {
     const dateFilter = { gte: startDate, lte: endDate };
     if (unit === BUSINESS_UNITS.MANUFACTURING) {
       const rows = await prisma.rawPurchase.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         select: { quantity: true, totalAmount: true },
       });
       return {
@@ -174,7 +175,7 @@ class TradingAccountService {
     }
 
     const rows = await prisma.purchase.findMany({
-      where: { date: dateFilter },
+      where: { ...ACTIVE_ONLY, date: dateFilter },
       select: { quantity: true, amount: true },
     });
     return {
@@ -299,18 +300,20 @@ class TradingAccountService {
     const [sales, invoices] = await Promise.all([
       prisma.manufacturingSale.findMany({
         where: {
+          ...ACTIVE_ONLY,
           date: dateFilter,
           productCategory: STOCK_CATEGORIES.FINISHED_GOODS,
         },
         select: { id: true, quantity: true, amount: true },
       }),
       prisma.invoice.findMany({
-        where: {
+        where: activeInvoiceWhere({
           date: dateFilter,
           manufacturingSale: {
+            isDeleted: false,
             productCategory: STOCK_CATEGORIES.FINISHED_GOODS,
           },
-        },
+        }),
         select: { manufacturingSaleId: true, amount: true },
       }),
     ]);
@@ -335,14 +338,14 @@ class TradingAccountService {
     const dateFilter = { gte: startDate, lte: endDate };
     const [sales, invoices] = await Promise.all([
       prisma.sale.findMany({
-        where: { date: dateFilter },
+        where: { ...ACTIVE_ONLY, date: dateFilter },
         select: { id: true, quantity: true, amount: true },
       }),
       prisma.invoice.findMany({
-        where: {
+        where: activeInvoiceWhere({
           date: dateFilter,
           tradingSaleId: { not: null },
-        },
+        }),
         select: { tradingSaleId: true, amount: true },
       }),
     ]);
@@ -394,6 +397,7 @@ class TradingAccountService {
   async getUnitExpenses(unit, startDate, endDate) {
     const expenses = await prisma.expense.findMany({
       where: {
+        ...ACTIVE_ONLY,
         businessUnit: unit,
         date: { gte: startDate, lte: endDate },
       },

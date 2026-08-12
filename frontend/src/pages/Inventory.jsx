@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -51,24 +51,72 @@ export default function Inventory() {
   const [editConfirm, setEditConfirm] = useState(null);
   const [fgBatches, setFgBatches] = useState([]);
 
-  const loadData = useCallback(() => {
-    setLoading(true);
-    Promise.all([
+  const loadSummary = useCallback(() => {
+    return Promise.all([
       api.get('/inventory/summary'),
-      api.get('/inventory/ledger', { params }),
       api.get('/manufacturing/finished-goods-batches'),
-    ])
-      .then(([summaryRes, ledgerRes, batchesRes]) => {
-        setSummary(summaryRes.data.data);
+    ]).then(([summaryRes, batchesRes]) => {
+      setSummary(summaryRes.data.data);
+      setFgBatches(batchesRes.data.data || []);
+    });
+  }, []);
+
+  const loadLedger = useCallback(() => {
+    setLoading(true);
+    return api
+      .get('/inventory/ledger', { params })
+      .then((ledgerRes) => {
         setLedger(ledgerRes.data.data);
         setPagination(ledgerRes.data.pagination);
-        setFgBatches(batchesRes.data.data || []);
       })
       .catch((err) => toast.error(getErrorMessage(err)))
       .finally(() => setLoading(false));
   }, [params]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  /** Full refresh after delete (stock + ledger). */
+  const loadData = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      loadSummary(),
+      api.get('/inventory/ledger', { params }),
+    ])
+      .then(([, ledgerRes]) => {
+        setLedger(ledgerRes.data.data);
+        setPagination(ledgerRes.data.pagination);
+      })
+      .catch((err) => toast.error(getErrorMessage(err)))
+      .finally(() => setLoading(false));
+  }, [loadSummary, params]);
+
+  const initialLoadDone = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      loadSummary(),
+      api.get('/inventory/ledger', { params }),
+    ])
+      .then(([, ledgerRes]) => {
+        if (cancelled) return;
+        setLedger(ledgerRes.data.data);
+        setPagination(ledgerRes.data.pagination);
+        initialLoadDone.current = true;
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error(getErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount + summary helper only
+  }, [loadSummary]);
+
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    loadLedger();
+  }, [loadLedger]);
 
   const seenRefs = new Set();
 

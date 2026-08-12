@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react';
 
 export function FieldLabel({ children, required = false, className = 'block text-sm mb-1' }) {
@@ -9,14 +10,33 @@ export function FieldLabel({ children, required = false, className = 'block text
   );
 }
 
-export function SearchBar({ value, onChange, placeholder = 'Search...' }) {
+export function SearchBar({ value, onChange, placeholder = 'Search...', debounceMs = 300 }) {
+  const [localValue, setLocalValue] = useState(value ?? '');
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    setLocalValue(value ?? '');
+  }, [value]);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  const handleChange = (next) => {
+    setLocalValue(next);
+    clearTimeout(timerRef.current);
+    if (!debounceMs) {
+      onChange(next);
+      return;
+    }
+    timerRef.current = setTimeout(() => onChange(next), debounceMs);
+  };
+
   return (
     <div className="relative">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
       <input
         type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={localValue}
+        onChange={(e) => handleChange(e.target.value)}
         placeholder={placeholder}
         className="input-field pl-10"
       />

@@ -299,29 +299,21 @@ class InventoryRepository {
     return balance;
   }
 
+  /**
+   * Fast delete check: projected stock after removing this reference's net effect.
+   * Same rule as full history walk (stock must not go negative), O(scopes) not O(history).
+   */
   async validateDeleteMovementsByReference(referenceType, referenceId, tx = null) {
-    const client = db(tx);
-    const entries = await client.stockLedger.findMany({
-      where: {
-        referenceType,
-        referenceId: String(referenceId),
-      },
-    });
+    const effects = await this.getReferenceScopeNetEffects(referenceType, referenceId, tx);
+    if (effects.size === 0) return;
 
-    if (entries.length === 0) return;
-
-    const scopes = this.collectScopes(entries);
-    for (const scope of scopes) {
-      const balance = await this.computeScopeBalanceAfterRemovingReference(
-        scope.category,
-        scope,
-        referenceType,
-        referenceId,
-        tx
-      );
-      if (balance < 0) {
+    for (const [key, net] of effects) {
+      const scope = this.parseScopeEffectKey(key);
+      const current = await this.getCurrentBalance(scope.category, scope, tx);
+      const projected = Math.round((current - net) * 100) / 100;
+      if (projected < 0) {
         throw new AppError(
-          `Cannot modify entry: ${scope.category} stock would become negative (${balance})`,
+          `Cannot modify entry: ${scope.category} stock would become negative (${projected})`,
           400
         );
       }
@@ -341,10 +333,31 @@ class InventoryRepository {
     if (entries.length === 0) return [];
 
     if (!skipValidation) {
+      // Reuse already-loaded net effects via validate (one more effects query is fine)
       await this.validateDeleteMovementsByReference(referenceType, referenceId, tx);
     }
 
     const scopes = this.collectScopes(entries);
+
+    // Per scope: earliest deleted movement (to detect later rows that need recalc)
+    const earliestByScope = new Map();
+    for (const entry of entries) {
+      const key = this.scopeEffectKey(entry.category, {
+        lotNumber: entry.lotNumber,
+        item: entry.itemId,
+        batchId: entry.batchId,
+        brandId: entry.brandId,
+      });
+      const prev = earliestByScope.get(key);
+      if (
+        !prev
+        || entry.createdAt < prev.createdAt
+        || (entry.createdAt.getTime() === prev.createdAt.getTime() && entry.id < prev.id)
+      ) {
+        earliestByScope.set(key, entry);
+      }
+    }
+
     await client.stockLedger.deleteMany({
       where: {
         referenceType,
@@ -353,10 +366,40 @@ class InventoryRepository {
     });
 
     for (const scope of scopes) {
-      await this.recalculateScope(scope.category, scope, tx);
+      const key = this.scopeEffectKey(scope.category, scope);
+      const earliest = earliestByScope.get(key);
+      const needsRecalc = earliest
+        ? await this.scopeHasMovementsAfter(scope.category, scope, earliest, tx)
+        : true;
+
+      if (needsRecalc) {
+        // Later movements exist — rewrite running balances for this scope only
+        await this.recalculateScope(scope.category, scope, tx);
+      }
+      // Else deleted tip of the ledger: remaining last entry.balanceAfter is already correct
     }
 
     return scopes;
+  }
+
+  async scopeHasMovementsAfter(category, scope, earliest, tx = null) {
+    const client = db(tx);
+    const later = await client.stockLedger.findFirst({
+      where: {
+        ...scopeWhere(category, scope),
+        OR: [
+          { createdAt: { gt: earliest.createdAt } },
+          {
+            AND: [
+              { createdAt: earliest.createdAt },
+              { id: { gt: earliest.id } },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    return Boolean(later);
   }
 
   /**
@@ -454,22 +497,42 @@ class InventoryRepository {
   async getLotsWithBalance(category, tx = null) {
     const client = db(tx);
     const rows = await client.$queryRaw`
-      SELECT DISTINCT "lotNumber"
-      FROM "StockLedger"
-      WHERE category = ${category}::"StockCategory"
-        AND "lotNumber" IS NOT NULL
-        AND "lotNumber" <> ''
+      SELECT
+        latest."lotNumber" AS "lotNumber",
+        latest."balanceAfter"::float AS balance
+      FROM (
+        SELECT DISTINCT ON ("lotNumber")
+          "lotNumber",
+          "balanceAfter"
+        FROM "StockLedger"
+        WHERE category = ${category}::"StockCategory"
+          AND "lotNumber" IS NOT NULL
+          AND "lotNumber" <> ''
+        ORDER BY "lotNumber", "createdAt" DESC, id DESC
+      ) AS latest
+      WHERE latest."balanceAfter" > 0
+      ORDER BY latest."lotNumber" ASC
     `;
 
-    const lots = [];
-    for (const row of rows) {
-      const lotNumber = row.lotNumber;
-      const balance = await this.getCurrentBalance(category, { lotNumber }, tx);
-      if (balance > 0) {
-        lots.push({ lotNumber, balance });
-      }
-    }
-    return lots.sort((a, b) => a.lotNumber.localeCompare(b.lotNumber));
+    return rows.map((row) => ({
+      lotNumber: row.lotNumber,
+      balance: Number(row.balance) || 0,
+    }));
+  }
+
+  /**
+   * Latest positive balances for many categories (one query per category, in parallel).
+   * Returns [{ lotNumber, category, balance }, ...]
+   */
+  async getLotBalancesForCategories(categories, tx = null) {
+    if (!categories?.length) return [];
+    const perCategory = await Promise.all(
+      categories.map(async (category) => {
+        const lots = await this.getLotsWithBalance(category, tx);
+        return lots.map(({ lotNumber, balance }) => ({ lotNumber, category, balance }));
+      })
+    );
+    return perCategory.flat();
   }
 
   async deductFromLotsFIFO(category, quantity, movementBase, tx = null) {
@@ -609,54 +672,45 @@ class InventoryRepository {
   }
 
   async getAvailableRawMaterialLots() {
-    const rows = await prisma.$queryRaw`
-      SELECT DISTINCT "lotNumber"
-      FROM "StockLedger"
-      WHERE category = ${STOCK_CATEGORIES.RAW_MATERIAL}::"StockCategory"
-        AND "lotNumber" IS NOT NULL
-        AND "lotNumber" <> ''
-    `;
-
-    const result = [];
-    for (const row of rows) {
-      const lotNumber = row.lotNumber;
-      const availableQty = await this.getCurrentBalance(STOCK_CATEGORIES.RAW_MATERIAL, { lotNumber });
-      if (availableQty > 0) {
-        result.push({ lotNumber, availableQty });
-      }
-    }
-    return result.sort((a, b) => a.lotNumber.localeCompare(b.lotNumber));
+    const lots = await this.getLotsWithBalance(STOCK_CATEGORIES.RAW_MATERIAL);
+    return lots
+      .map(({ lotNumber, balance }) => ({ lotNumber, availableQty: balance }))
+      .sort((a, b) => a.lotNumber.localeCompare(b.lotNumber));
   }
 
   async getStockSummary() {
     const categories = Object.values(STOCK_CATEGORIES);
     const summary = {};
 
-    for (const category of categories) {
-      if (category === STOCK_CATEGORIES.BRANDED_GOODS) {
-        // Packet balances are enriched in inventory.service.getStockSummary()
-        continue;
-      }
-      if (category === STOCK_CATEGORIES.TRADING) {
-        const tradingStock = await prisma.$queryRaw`
-          SELECT DISTINCT ON ("itemId")
-            "itemId" AS "_id",
-            "balanceAfter" AS balance
-          FROM "StockLedger"
-          WHERE category = ${STOCK_CATEGORIES.TRADING}::"StockCategory"
-            AND "itemId" IS NOT NULL
-          ORDER BY "itemId", "createdAt" DESC, id DESC
-        `;
-        summary[category] = tradingStock.map((row) => ({
-          _id: row._id,
-          balance: Number(row.balance),
-        }));
-      } else if (category === STOCK_CATEGORIES.FINISHED_GOODS) {
-        summary[category] = await this.getFinishedGoodsTotalFromBatches();
-      } else {
+    await Promise.all(
+      categories.map(async (category) => {
+        if (category === STOCK_CATEGORIES.BRANDED_GOODS) {
+          // Packet balances are enriched in inventory.service.getStockSummary()
+          return;
+        }
+        if (category === STOCK_CATEGORIES.TRADING) {
+          const tradingStock = await prisma.$queryRaw`
+            SELECT DISTINCT ON ("itemId")
+              "itemId" AS "_id",
+              "balanceAfter" AS balance
+            FROM "StockLedger"
+            WHERE category = ${STOCK_CATEGORIES.TRADING}::"StockCategory"
+              AND "itemId" IS NOT NULL
+            ORDER BY "itemId", "createdAt" DESC, id DESC
+          `;
+          summary[category] = tradingStock.map((row) => ({
+            _id: row._id,
+            balance: Number(row.balance),
+          }));
+          return;
+        }
+        if (category === STOCK_CATEGORIES.FINISHED_GOODS) {
+          summary[category] = await this.getFinishedGoodsTotalFromBatches();
+          return;
+        }
         summary[category] = await this.getTotalCategoryBalance(category);
-      }
-    }
+      })
+    );
 
     return summary;
   }
@@ -743,6 +797,50 @@ class InventoryRepository {
       },
       totalIn: Number(row.totalIn),
       totalOut: Number(row.totalOut),
+    }));
+  }
+
+  /**
+   * Active trading items with current ledger balance in one query
+   * (DISTINCT ON latest balance + LEFT JOIN so items with no movements stay at 0).
+   */
+  async getTradingStockWithBalances() {
+    const rows = await prisma.$queryRaw`
+      SELECT
+        i.id,
+        i.name,
+        i.sku,
+        i.unit,
+        i.description,
+        i.category,
+        i."isActive",
+        COALESCE(b.balance, 0)::float AS balance
+      FROM "Item" i
+      LEFT JOIN (
+        SELECT DISTINCT ON ("itemId")
+          "itemId",
+          "balanceAfter" AS balance
+        FROM "StockLedger"
+        WHERE category = ${STOCK_CATEGORIES.TRADING}::"StockCategory"
+          AND "itemId" IS NOT NULL
+        ORDER BY "itemId", "createdAt" DESC, id DESC
+      ) b ON b."itemId" = i.id
+      WHERE i."isActive" = true
+      ORDER BY i.name ASC
+    `;
+
+    return rows.map((row) => ({
+      item: {
+        id: row.id,
+        _id: row.id,
+        name: row.name,
+        sku: row.sku,
+        unit: row.unit,
+        description: row.description,
+        category: row.category,
+        isActive: row.isActive,
+      },
+      balance: Number(row.balance) || 0,
     }));
   }
 

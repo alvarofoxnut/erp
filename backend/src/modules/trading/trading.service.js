@@ -557,7 +557,9 @@ class TradingService {
 
       await inventoryService.validateDeleteMovementsByReference('Purchase', existing.id, tx);
       await accountingService.deleteLedgerEntriesByReference('Purchase', existing.id, tx);
-      await inventoryService.deleteMovementsByReference('Purchase', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('Purchase', existing.id, tx, {
+        skipValidation: true,
+      });
       await tx.purchase.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),
@@ -619,7 +621,9 @@ class TradingService {
       await softDeleteInvoice(tx, { tradingSaleId: id }, userId, deleteReason);
 
       await accountingService.deleteLedgerEntriesByReference('Sale', existing.id, tx);
-      await inventoryService.deleteMovementsByReference('Sale', existing.id, tx);
+      await inventoryService.deleteMovementsByReference('Sale', existing.id, tx, {
+        skipValidation: true,
+      });
       await tx.sale.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),

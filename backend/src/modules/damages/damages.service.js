@@ -316,7 +316,9 @@ class DamagesService {
       await inventoryService.validateDeleteMovementsByReference('ManufacturingDamage', id, tx);
       await damagesInventoryService.restoreManufacturingLines(existing.lines, tx);
       await accountingService.deleteLedgerEntriesByReference('ManufacturingDamage', id, tx);
-      await inventoryService.deleteMovementsByReference('ManufacturingDamage', id, tx);
+      await inventoryService.deleteMovementsByReference('ManufacturingDamage', id, tx, {
+        skipValidation: true,
+      });
       await tx.manufacturingDamage.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),
@@ -470,7 +472,9 @@ class DamagesService {
 
       await inventoryService.validateDeleteMovementsByReference('TradingDamage', id, tx);
       await accountingService.deleteLedgerEntriesByReference('TradingDamage', id, tx);
-      await inventoryService.deleteMovementsByReference('TradingDamage', id, tx);
+      await inventoryService.deleteMovementsByReference('TradingDamage', id, tx, {
+        skipValidation: true,
+      });
       await tx.tradingDamage.update({
         where: { id },
         data: softDeletePayload(userId, deleteReason),

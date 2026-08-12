@@ -43,7 +43,7 @@ class AccountingService {
 
     const entries = await client.ledgerEntry.findMany({
       where: { ledgerId },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
     let balance = ledger.openingBalance || 0;
@@ -64,6 +64,12 @@ class AccountingService {
     return balance;
   }
 
+  /**
+   * Reverse ledger lines for a reference without full-history rebuild.
+   * - Adjusts ledger.currentBalance by the exact reverse of deleted lines
+   * - Adjusts balanceAfter only on entries that came after the deleted ones
+   * Full recalculateLedgerBalance remains available for repair/audit.
+   */
   async deleteLedgerEntriesByReference(referenceType, referenceId, tx = null) {
     const client = db(tx);
     const refId = String(referenceId);
@@ -72,13 +78,66 @@ class AccountingService {
     });
     if (!entries.length) return;
 
-    const ledgerIds = [...new Set(entries.map((e) => e.ledgerId))];
+    const byLedger = new Map();
+    for (const entry of entries) {
+      if (!byLedger.has(entry.ledgerId)) byLedger.set(entry.ledgerId, []);
+      byLedger.get(entry.ledgerId).push(entry);
+    }
+
     await client.ledgerEntry.deleteMany({
       where: { referenceType, referenceId: refId },
     });
 
-    for (const ledgerId of ledgerIds) {
-      await this.recalculateLedgerBalance(ledgerId, tx);
+    for (const [ledgerId, ledgerEntries] of byLedger) {
+      const netChange = Math.round(
+        ledgerEntries.reduce((sum, e) => sum + (e.credit - e.debit), 0) * 100
+      ) / 100;
+
+      let earliest = ledgerEntries[0];
+      for (const e of ledgerEntries) {
+        if (
+          e.date < earliest.date
+          || (e.date.getTime() === earliest.date.getTime() && e.createdAt < earliest.createdAt)
+          || (
+            e.date.getTime() === earliest.date.getTime()
+            && e.createdAt.getTime() === earliest.createdAt.getTime()
+            && e.id < earliest.id
+          )
+        ) {
+          earliest = e;
+        }
+      }
+
+      await client.ledger.update({
+        where: { id: ledgerId },
+        data: { currentBalance: { decrement: netChange } },
+      });
+
+      if (netChange === 0) continue;
+
+      // Fix running balances on later entries (same effect as create reversing)
+      await client.ledgerEntry.updateMany({
+        where: {
+          ledgerId,
+          OR: [
+            { date: { gt: earliest.date } },
+            {
+              AND: [
+                { date: earliest.date },
+                { createdAt: { gt: earliest.createdAt } },
+              ],
+            },
+            {
+              AND: [
+                { date: earliest.date },
+                { createdAt: earliest.createdAt },
+                { id: { gt: earliest.id } },
+              ],
+            },
+          ],
+        },
+        data: { balanceAfter: { decrement: netChange } },
+      });
     }
   }
 

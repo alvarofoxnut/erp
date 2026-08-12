@@ -172,7 +172,6 @@ export default function QualityProduction() {
   const {
     data: wipLots,
     loading: loadingWipLots,
-    refetch: refetchWipLots,
   } = useResourceQuery('/manufacturing/wip-lots');
 
 
@@ -292,8 +291,7 @@ export default function QualityProduction() {
       setEditRow(null);
 
       setSelectedLot('');
-
-      void refetchWipLots();
+      // WIP lots refresh via useDataTable notifyStock → QueryCacheSync
 
     }
 

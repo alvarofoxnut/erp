@@ -263,8 +263,7 @@ export default function FinishedProduction() {
       setModalOpen(false);
 
       setEditRow(null);
-
-      void refetchLotsQualityStock();
+      // Quality stock refresh via useDataTable notifyStock → QueryCacheSync
 
     }
 

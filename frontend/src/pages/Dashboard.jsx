@@ -20,10 +20,7 @@ export default function Dashboard() {
 
   const fetchDashboard = useCallback(() => {
     setLoading(true);
-    api.get('/dashboard', {
-      params: { _: Date.now() },
-      headers: { 'Cache-Control': 'no-cache' },
-    })
+    api.get('/dashboard')
       .then(({ data: res }) => setData(res.data))
       .catch(console.error)
       .finally(() => setLoading(false));

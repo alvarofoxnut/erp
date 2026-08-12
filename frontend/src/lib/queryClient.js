@@ -35,12 +35,3 @@ export const queryKeys = {
 export function clearAppQueryCache() {
   queryClient.clear();
 }
-
-/** After stock-affecting writes, force lists/options/resource panels to revalidate. */
-export function invalidateDataCaches() {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: ['dataTable'] }),
-    queryClient.invalidateQueries({ queryKey: ['fetchOptions'] }),
-    queryClient.invalidateQueries({ queryKey: ['resource'] }),
-  ]);
-}
