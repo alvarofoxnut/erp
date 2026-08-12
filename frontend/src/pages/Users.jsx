@@ -8,7 +8,7 @@ import ExcelImportModal from '../components/ExcelImportModal';
 import { useExcelImport } from '../hooks/useExcelImport';
 
 export default function Users() {
-  const { data, pagination, loading, params, setPage, setSearch, createItem, updateItem, fetchData } = useDataTable('/users', { notifyStock: false });
+  const { data, pagination, loading, params, setPage, setSearch, saving, createItem, updateItem, fetchData } = useDataTable('/users', { notifyStock: false });
   const [modalOpen, setModalOpen] = useState(false);
   const [editUser, setEditUser] = useState(null);
   const { onImport, importModalProps } = useExcelImport('users', fetchData);
@@ -24,6 +24,7 @@ export default function Users() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payload = {
       name: fd.get('name'), email: fd.get('email'), role: fd.get('role'),
@@ -80,7 +81,7 @@ export default function Users() {
               ))}
             </select>
           </div>
-          <button type="submit" className="btn-primary w-full">{editUser ? 'Update' : 'Create'} User</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : `${editUser ? 'Update' : 'Create'} User`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

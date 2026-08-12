@@ -15,7 +15,7 @@ export default function Invoices() {
   const invoiceTab = type === 'vendors' ? 'vendor' : 'customer';
   const isCustomer = invoiceTab === 'customer';
 
-  const { data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const { data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/accounting/invoices', { initialParams: { invoiceType: invoiceTab }, notifyStock: false });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -96,6 +96,7 @@ export default function Invoices() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payload = buildInvoicePayload(fd);
 
@@ -456,7 +457,7 @@ export default function Invoices() {
             <div><label className="block text-sm mb-1">Email</label><input name="email" type="email" defaultValue={entryDefaults.email} className="input-field" /></div>
           </div>
           <div><label className="block text-sm mb-1">Address</label><textarea name="address" defaultValue={entryDefaults.address} className="input-field" rows={2} /></div>
-          <button type="submit" className="btn-primary w-full">{editInvoice ? 'Update Invoice' : 'Create Invoice'}</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : (editInvoice ? 'Update Invoice' : 'Create Invoice')}</button>
         </form>
       </Modal>
 

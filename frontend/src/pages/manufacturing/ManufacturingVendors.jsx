@@ -9,7 +9,7 @@ import ExcelImportModal from '../../components/ExcelImportModal';
 import { useExcelImport } from '../../hooks/useExcelImport';
 
 export default function ManufacturingVendors() {
-  const {data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/manufacturing/vendors', { notifyStock: false });
   const { onImport, importModalProps } = useExcelImport('manufacturing-vendors', fetchData);
 
@@ -32,6 +32,7 @@ export default function ManufacturingVendors() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payload = {
       name: fd.get('name'),
@@ -150,7 +151,7 @@ export default function ManufacturingVendors() {
             <label className="block text-sm mb-1">Address</label>
             <textarea name="address" defaultValue={editItem?.address} className="input-field" rows={2} />
           </div>
-          <button type="submit" className="btn-primary w-full">{editItem ? 'Update' : 'Create'} Vendor</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : `${editItem ? 'Update' : 'Create'} Vendor`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

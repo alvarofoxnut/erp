@@ -1,12 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 import { useLocation } from 'react-router-dom';
 
 import { Plus } from 'lucide-react';
 
-import api from '../../services/api';
-
-import { useDataTable } from '../../hooks/useDataTable';
+import { useDataTable, useResourceQuery } from '../../hooks/useDataTable';
 
 import LoadingSpinner from '../../components/LoadingSpinner';
 
@@ -160,7 +158,7 @@ export default function QualityProduction() {
 
   const location = useLocation();
 
-  const {data, pagination, loading, params, setPage, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, saving, params, setPage, updateParams, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/manufacturing/quality-productions');
   const { onImport, importModalProps } = useExcelImport('quality-productions', fetchData);
 
@@ -169,43 +167,13 @@ export default function QualityProduction() {
 
   const [editRow, setEditRow] = useState(null);
 
-  const [wipLots, setWipLots] = useState([]);
-
-  const [loadingWipLots, setLoadingWipLots] = useState(false);
-
   const [selectedLot, setSelectedLot] = useState('');
 
-
-
-  const loadWipLots = useCallback(() => {
-
-    setLoadingWipLots(true);
-
-    api.get('/manufacturing/wip-lots')
-
-      .then(({ data: res }) => setWipLots(res.data || []))
-
-      .catch(() => setWipLots([]))
-
-      .finally(() => setLoadingWipLots(false));
-
-  }, []);
-
-
-
-  useEffect(() => {
-
-    loadWipLots();
-
-  }, [loadWipLots]);
-
-
-
-  useEffect(() => {
-
-    if (modalOpen) loadWipLots();
-
-  }, [modalOpen, loadWipLots]);
+  const {
+    data: wipLots,
+    loading: loadingWipLots,
+    refetch: refetchWipLots,
+  } = useResourceQuery('/manufacturing/wip-lots');
 
 
 
@@ -279,6 +247,8 @@ export default function QualityProduction() {
 
     e.preventDefault();
 
+    if (saving) return;
+
     const fd = new FormData(e.target);
 
     const payload = {
@@ -323,7 +293,7 @@ export default function QualityProduction() {
 
       setSelectedLot('');
 
-      loadWipLots();
+      void refetchWipLots();
 
     }
 
@@ -724,9 +694,9 @@ export default function QualityProduction() {
 
 
 
-          <button type="submit" className="btn-primary w-full" disabled={!selectedLot}>
+          <button type="submit" className="btn-primary w-full" disabled={saving || !selectedLot}>
 
-            {editRow ? 'Update' : 'Save'} Output
+            {saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Output`}
 
           </button>
 

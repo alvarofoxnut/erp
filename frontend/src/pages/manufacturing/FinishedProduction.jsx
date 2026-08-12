@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 import { useLocation } from 'react-router-dom';
 
 import { Plus } from 'lucide-react';
 
-import { useDataTable } from '../../hooks/useDataTable';
+import { useDataTable, useResourceQuery } from '../../hooks/useDataTable';
 
 import LoadingSpinner from '../../components/LoadingSpinner';
 
@@ -18,8 +18,6 @@ import { exportFilteredList } from '../../utils/listExport';
 import ExcelImportModal from '../../components/ExcelImportModal';
 import { useExcelImport } from '../../hooks/useExcelImport';
 import BrandedPackagingTab from './BrandedPackagingTab';
-
-import api from '../../services/api';
 
 import {
 
@@ -37,7 +35,7 @@ export default function FinishedProduction() {
 
   const location = useLocation();
 
-  const {data, pagination, loading, params, setPage, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, saving, params, setPage, updateParams, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/manufacturing/finished-productions');
   const { onImport, importModalProps } = useExcelImport('finished-productions', fetchData);
 
@@ -48,10 +46,6 @@ export default function FinishedProduction() {
   const [editRow, setEditRow] = useState(null);
 
   const [mode, setMode] = useState('proportionate');
-
-  const [lotsQualityStock, setLotsQualityStock] = useState([]);
-
-  const [loadingLots, setLoadingLots] = useState(false);
 
   const [selectedLot, setSelectedLot] = useState('');
 
@@ -71,37 +65,11 @@ export default function FinishedProduction() {
 
   });
 
-
-
-  const loadLotsQualityStock = useCallback(() => {
-
-    setLoadingLots(true);
-
-    api.get('/manufacturing/lots-quality-stock')
-
-      .then(({ data: res }) => setLotsQualityStock(res.data || []))
-
-      .catch(() => setLotsQualityStock([]))
-
-      .finally(() => setLoadingLots(false));
-
-  }, []);
-
-
-
-  useEffect(() => {
-
-    loadLotsQualityStock();
-
-  }, [loadLotsQualityStock]);
-
-
-
-  useEffect(() => {
-
-    if (modalOpen) loadLotsQualityStock();
-
-  }, [modalOpen, loadLotsQualityStock]);
+  const {
+    data: lotsQualityStock,
+    loading: loadingLots,
+    refetch: refetchLotsQualityStock,
+  } = useResourceQuery('/manufacturing/lots-quality-stock');
 
 
 
@@ -254,6 +222,8 @@ export default function FinishedProduction() {
 
     e.preventDefault();
 
+    if (saving) return;
+
     const fd = new FormData(e.target);
 
     const payload = {
@@ -294,7 +264,7 @@ export default function FinishedProduction() {
 
       setEditRow(null);
 
-      loadLotsQualityStock();
+      void refetchLotsQualityStock();
 
     }
 
@@ -390,7 +360,7 @@ export default function FinishedProduction() {
       </div>
 
       {activeTab === 'branded' ? (
-        <BrandedPackagingTab lotsQualityStock={lotsQualityStock} onRefreshLots={loadLotsQualityStock} />
+        <BrandedPackagingTab lotsQualityStock={lotsQualityStock} onRefreshLots={refetchLotsQualityStock} />
       ) : (
       <>
 
@@ -1087,9 +1057,9 @@ export default function FinishedProduction() {
 
 
 
-          <button type="submit" className="btn-primary w-full" disabled={!selectedLot}>
+          <button type="submit" className="btn-primary w-full" disabled={saving || !selectedLot}>
 
-            {editRow ? 'Update' : 'Save'} Production
+            {saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Production`}
 
           </button>
 

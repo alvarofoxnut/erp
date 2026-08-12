@@ -13,7 +13,7 @@ import { useExcelImport } from '../../hooks/useExcelImport';
 
 export default function MachineEntry() {
   const location = useLocation();
-  const {data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/manufacturing/machine-entries');
   const { onImport, importModalProps } = useExcelImport('machine-entries', fetchData);
 
@@ -51,6 +51,7 @@ export default function MachineEntry() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payload = {
       lotNumber: fd.get('lotNumber'),
@@ -139,7 +140,7 @@ export default function MachineEntry() {
           </div>
           <div><FieldLabel required>Quantity Sent (KG)</FieldLabel><input name="quantitySent" type="number" step="0.01" min="0.01" required defaultValue={editRow?.quantitySent} className="input-field" /></div>
           <div><FieldLabel required>Date</FieldLabel><input name="date" type="date" required defaultValue={defaultDate} className="input-field" /></div>
-          <button type="submit" disabled={!editRow && lots.length === 0} className="btn-primary w-full">{editRow ? 'Update' : 'Save'} Entry</button>
+          <button type="submit" disabled={saving || (!editRow && lots.length === 0)} className="btn-primary w-full">{saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Entry`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

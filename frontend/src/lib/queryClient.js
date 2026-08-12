@@ -28,6 +28,7 @@ export const queryKeys = {
   dataTable: (endpoint, params) =>
     (params === undefined ? ['dataTable', endpoint] : ['dataTable', endpoint, params]),
   fetchOptions: (endpoint) => ['fetchOptions', endpoint],
+  resource: (endpoint) => ['resource', endpoint],
 };
 
 /** Drop all cached API data (logout / session end). */
@@ -35,10 +36,11 @@ export function clearAppQueryCache() {
   queryClient.clear();
 }
 
-/** After stock-affecting writes, force lists/options to revalidate. */
+/** After stock-affecting writes, force lists/options/resource panels to revalidate. */
 export function invalidateDataCaches() {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: ['dataTable'] }),
     queryClient.invalidateQueries({ queryKey: ['fetchOptions'] }),
+    queryClient.invalidateQueries({ queryKey: ['resource'] }),
   ]);
 }

@@ -124,6 +124,7 @@ export default function BrandedPackagingTab({ lotsQualityStock = [], onRefreshLo
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     if (stockWarnings.length) {
       toast.error(`Insufficient ${stockWarnings[0].label} stock.`);
       return;

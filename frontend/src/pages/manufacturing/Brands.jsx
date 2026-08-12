@@ -10,7 +10,7 @@ import { qualityPerPacketGrams, gradeGramsPerPacket, gradeGramsToFormValues } fr
 const round2 = (n) => Math.round((n || 0) * 100) / 100;
 
 export default function Brands() {
-  const { data, pagination, loading, params, setPage, setSearch, createItem, updateItem, deleteItem } =
+  const { data, pagination, loading, params, setPage, setSearch, saving, createItem, updateItem, deleteItem } =
     useDataTable('/manufacturing/brands', { notifyStock: false });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -95,6 +95,7 @@ export default function Brands() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     if (!proportionsValid || !packingWeightValid || !derivedQuality) return;
     const payload = {
       name: form.name.trim(),
@@ -313,9 +314,9 @@ export default function Brands() {
             <button
               type="submit"
               className="btn-primary"
-              disabled={!proportionsValid || !packingWeightValid || !derivedQuality}
+              disabled={saving || !proportionsValid || !packingWeightValid || !derivedQuality}
             >
-              {editItem ? 'Update' : 'Save'}
+              {saving ? 'Saving...' : editItem ? 'Update' : 'Save'}
             </button>
           </div>
         </form>

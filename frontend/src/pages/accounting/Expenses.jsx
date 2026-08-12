@@ -17,7 +17,7 @@ const UNIT_LABELS = {
 export default function Expenses({ businessUnit = 'manufacturing' }) {
   const unitLabel = UNIT_LABELS[businessUnit] || businessUnit;
 
-  const { data, pagination, loading, params, setPage, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const { data, pagination, loading, params, setPage, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/accounting/expenses', {
       notifyStock: false,
       initialParams: { businessUnit },
@@ -57,6 +57,7 @@ export default function Expenses({ businessUnit = 'manufacturing' }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payload = {
       businessUnit,
@@ -207,7 +208,7 @@ export default function Expenses({ businessUnit = 'manufacturing' }) {
             <label className="block text-sm mb-1">Description</label>
             <textarea name="description" defaultValue={editItem?.description} className="input-field" rows={2} />
           </div>
-          <button type="submit" className="btn-primary w-full">{editItem ? 'Update' : 'Save'} Expense</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : `${editItem ? 'Update' : 'Save'} Expense`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

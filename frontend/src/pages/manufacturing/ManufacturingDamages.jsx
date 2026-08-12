@@ -56,7 +56,7 @@ export default function ManufacturingDamages() {
   const location = useLocation();
   const { can } = usePermissions();
   const canWrite = can(PERMISSIONS.MFG_DAMAGES_WRITE);
-  const {data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/damages/manufacturing');
   const { onImport, importModalProps } = useExcelImport('manufacturing-damages', fetchData);
 
@@ -219,6 +219,7 @@ export default function ManufacturingDamages() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payloadLines = [];
 
@@ -515,8 +516,8 @@ export default function ManufacturingDamages() {
             <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary w-full sm:w-auto">
               Cancel
             </button>
-            <button type="submit" className="btn-primary w-full sm:w-auto">
-              {editRow ? 'Update' : 'Save'} Damage Entry
+            <button type="submit" disabled={saving} className="btn-primary w-full sm:w-auto">
+              {saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Damage Entry`}
             </button>
           </div>
         </form>

@@ -21,7 +21,7 @@ import {
 
 export default function ManufacturingSales() {
   const location = useLocation();
-  const { data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const { data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/manufacturing/sales');
   const { onImport, importModalProps } = useExcelImport('manufacturing-sales', fetchData);
 
@@ -127,6 +127,7 @@ export default function ManufacturingSales() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
 
     if (isBranded) {
@@ -426,7 +427,7 @@ export default function ManufacturingSales() {
           )}
 
           <CustomerDetailsFields defaults={customerDefaults} />
-          <button type="submit" className="btn-primary w-full">{editRow ? 'Update' : 'Save'} Sale</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Sale`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

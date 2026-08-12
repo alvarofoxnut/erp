@@ -14,7 +14,7 @@ import { useExcelImport } from '../../hooks/useExcelImport';
 
 export default function Purchases() {
   const location = useLocation();
-  const {data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/trading/purchases');
   const { onImport, importModalProps } = useExcelImport('trading-purchases', fetchData);
 
@@ -53,6 +53,7 @@ export default function Purchases() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const payload = {
       date: fd.get('date'),
@@ -151,7 +152,7 @@ export default function Purchases() {
             defaultAmount={editRow?.amount}
             unit={unit}
           />
-          <button type="submit" disabled={!selectedItem || vendors.length === 0} className="btn-primary w-full">{editRow ? 'Update' : 'Save'} Purchase</button>
+          <button type="submit" disabled={saving || !selectedItem || vendors.length === 0} className="btn-primary w-full">{saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Purchase`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

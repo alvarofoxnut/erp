@@ -15,7 +15,7 @@ import api from '../../services/api';
 
 export default function Sales() {
   const location = useLocation();
-  const {data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/trading/sales');
   const { onImport, importModalProps } = useExcelImport('trading-sales', fetchData);
 
@@ -55,6 +55,7 @@ export default function Sales() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const quantity = parseFloat(fd.get('quantity'));
     if (availableStock !== null && quantity > availableStock) {
@@ -153,7 +154,7 @@ export default function Sales() {
             defaultAmount={editRow?.amount}
             unit={items.find((i) => i._id === selectedItem)?.unit || 'KG'}
           />
-          <button type="submit" className="btn-primary w-full">{editRow ? 'Update' : 'Save'} Sale</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Sale`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

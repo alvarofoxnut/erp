@@ -9,7 +9,7 @@ import ExcelImportModal from '../../components/ExcelImportModal';
 import { useExcelImport } from '../../hooks/useExcelImport';
 
 export default function Items() {
-  const {data, pagination, loading, params, setPage, setSearch, updateParams, createItem, updateItem, deleteItem, fetchData } =
+  const {data, pagination, loading, params, setPage, setSearch, updateParams, saving, createItem, updateItem, deleteItem, fetchData } =
     useDataTable('/trading/items', { notifyStock: false });
   const { onImport, importModalProps } = useExcelImport('trading-items', fetchData);
 
@@ -33,6 +33,7 @@ export default function Items() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const fd = new FormData(e.target);
     const sku = String(fd.get('sku') || '').trim();
     const description = String(fd.get('description') || '').trim();
@@ -96,7 +97,7 @@ export default function Items() {
           <div><label className="block text-sm mb-1">SKU</label><input name="sku" defaultValue={editItem?.sku} className="input-field" /></div>
           <div><label className="block text-sm mb-1">Unit</label><input name="unit" defaultValue={editItem?.unit || 'KG'} className="input-field" /></div>
           <div><label className="block text-sm mb-1">Description</label><textarea name="description" defaultValue={editItem?.description} className="input-field" rows={2} /></div>
-          <button type="submit" className="btn-primary w-full">{editItem ? 'Update' : 'Create'} Item</button>
+          <button type="submit" disabled={saving} className="btn-primary w-full">{saving ? 'Saving...' : `${editItem ? 'Update' : 'Create'} Item`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

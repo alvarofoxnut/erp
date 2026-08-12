@@ -17,6 +17,8 @@ async function fetchDataTable(endpoint, params) {
 export function useDataTable(endpoint, { initialParams = {}, notifyStock = true } = {}) {
   const queryClient = useQueryClient();
   const [params, setParams] = useState({ page: 1, limit: 10, ...initialParams });
+  const [saving, setSaving] = useState(false);
+  const writeLockRef = useRef(false);
   const lastErrorToast = useRef(null);
 
   const queryKey = queryKeys.dataTable(endpoint, params);
@@ -24,14 +26,12 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
   const query = useQuery({
     queryKey,
     queryFn: () => fetchDataTable(endpoint, params),
-    // Keep prior rows visible while params change / background refetch runs
     placeholderData: (previousData) => previousData,
   });
 
   useEffect(() => {
     if (!query.isError || !query.error) return;
     const message = getErrorMessage(query.error);
-    // Avoid toast spam when refetchOnMount retries the same failure
     if (lastErrorToast.current === message) return;
     lastErrorToast.current = message;
     toast.error(message);
@@ -43,8 +43,6 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
 
   const data = query.data?.rows ?? [];
   const pagination = query.data?.pagination ?? { page: 1, totalPages: 1, total: 0 };
-
-  // Spinner only when there is no cached/placeholder payload yet
   const loading = query.isLoading && !query.data;
 
   const updateParams = useCallback((updates) => {
@@ -65,60 +63,83 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
   }, [queryClient, endpoint, query]);
 
   /**
-   * Writes always hit the API first. Only after success do we invalidate
-   * caches and refetch the active list so the UI cannot keep pre-write rows.
+   * Revalidate caches after a successful write.
+   * Runs in the background so the modal can close immediately after the API succeeds.
    */
-  const afterWrite = async () => {
-    if (notifyStock) {
-      notifyStockUpdated();
-      await invalidateDataCaches();
-    } else {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) });
-      await queryClient.invalidateQueries({ queryKey: ['fetchOptions'] });
-    }
-    await query.refetch();
-  };
+  const afterWrite = useCallback(() => {
+    const run = async () => {
+      try {
+        if (notifyStock) {
+          notifyStockUpdated();
+          await invalidateDataCaches();
+        } else {
+          await queryClient.invalidateQueries({ queryKey: queryKeys.dataTable(endpoint) });
+          await queryClient.invalidateQueries({ queryKey: ['fetchOptions'] });
+        }
+        await query.refetch();
+      } catch {
+        // List will refresh on next mount/focus; write already succeeded on server
+      }
+    };
+    void run();
+  }, [notifyStock, queryClient, endpoint, query]);
 
-  const createItem = async (payload, createEndpoint = endpoint) => {
+  const withWriteLock = async (fn) => {
+    if (writeLockRef.current) return false;
+    writeLockRef.current = true;
+    setSaving(true);
     try {
-      await api.post(createEndpoint, payload);
-      toast.success('Created successfully');
-      await afterWrite();
-      return true;
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-      return false;
-    }
-  };
-
-  const updateItem = async (id, payload) => {
-    try {
-      await api.put(`${endpoint}/${id}`, payload);
-      toast.success('Updated successfully');
-      await afterWrite();
-      return true;
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-      return false;
+      return await fn();
+    } finally {
+      writeLockRef.current = false;
+      setSaving(false);
     }
   };
 
-  const deleteItem = async (id, deleteReason) => {
-    try {
-      await api.delete(`${endpoint}/${id}`, { data: { deleteReason } });
-      toast.success('Deleted successfully');
-      await afterWrite();
-      return true;
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-      return false;
-    }
-  };
+  const createItem = async (payload, createEndpoint = endpoint) =>
+    withWriteLock(async () => {
+      try {
+        await api.post(createEndpoint, payload);
+        toast.success('Created successfully');
+        afterWrite();
+        return true;
+      } catch (err) {
+        toast.error(getErrorMessage(err));
+        return false;
+      }
+    });
+
+  const updateItem = async (id, payload) =>
+    withWriteLock(async () => {
+      try {
+        await api.put(`${endpoint}/${id}`, payload);
+        toast.success('Updated successfully');
+        afterWrite();
+        return true;
+      } catch (err) {
+        toast.error(getErrorMessage(err));
+        return false;
+      }
+    });
+
+  const deleteItem = async (id, deleteReason) =>
+    withWriteLock(async () => {
+      try {
+        await api.delete(`${endpoint}/${id}`, { data: { deleteReason } });
+        toast.success('Deleted successfully');
+        afterWrite();
+        return true;
+      } catch (err) {
+        toast.error(getErrorMessage(err));
+        return false;
+      }
+    });
 
   return {
     data,
     pagination,
     loading,
+    saving,
     params,
     updateParams,
     setPage,
@@ -142,4 +163,22 @@ export function useFetchOptions(endpoint) {
   });
 
   return data;
+}
+
+/** Cached GET for summary/stock panels (WIP lots, quality stock, etc.). */
+export function useResourceQuery(endpoint) {
+  const query = useQuery({
+    queryKey: queryKeys.resource(endpoint),
+    queryFn: async () => {
+      const { data: res } = await api.get(endpoint);
+      return res.data || [];
+    },
+    placeholderData: (previousData) => previousData,
+  });
+
+  return {
+    data: query.data ?? [],
+    loading: query.isLoading && !query.data,
+    refetch: query.refetch,
+  };
 }
