@@ -91,7 +91,7 @@ export default function RawPurchase() {
                   <tr key={r._id}>
                     <td>{formatDate(r.date)}</td><td>{r.vendor?.name}</td><td className="font-mono">{r.lotNumber}</td>
                     <td>{formatNumber(r.quantity)}</td><td>{formatCurrency(r.purchaseRate)}/KG</td><td>{formatCurrency(r.totalAmount)}</td>
-                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete raw purchase" editTitle="Edit raw purchase" /></td>
+                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete raw purchase" editTitle="Edit raw purchase" itemLabel={`Lot ${r.lotNumber} · ${r.vendor?.name || 'Vendor'} · ${formatNumber(r.quantity)} KG · ${formatDate(r.date)}`} /></td>
                   </tr>
                 ))}
               </tbody>

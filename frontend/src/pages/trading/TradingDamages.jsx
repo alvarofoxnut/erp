@@ -256,6 +256,7 @@ export default function TradingDamages() {
                             onDelete={(reason) => deleteItem(r._id, reason)}
                             deleteTitle="Delete damage entry"
                             editTitle="Edit damage entry"
+                            itemLabel={`${r.serialNumber || 'Damage'} · ${formatCurrency(r.totalLoss)} · ${formatDate(r.date)}`}
                           />
                         </td>
                       )}

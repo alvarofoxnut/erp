@@ -588,6 +588,8 @@ export default function FinishedProduction() {
 
                           editTitle="Edit finished production"
 
+                          itemLabel={`Lot ${r.lotNumber || '—'} · ${formatNumber(r.finishedQuantity ?? r.quantity ?? 0)} KG · ${formatDate(r.date)}`}
+
                         />
 
                       </td>

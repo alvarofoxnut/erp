@@ -101,7 +101,8 @@ export default function Parties() {
                       <DeleteButton
                         onDelete={(reason) => deleteItem(p._id, reason)}
                         title="Delete vendor"
-                        message={`Are you sure you want to delete vendor "${p.name}"?`}
+                        message="Are you sure you want to delete this vendor?"
+                        itemLabel={p.name}
                       >
                         <Trash2 className="h-4 w-4" />
                       </DeleteButton>

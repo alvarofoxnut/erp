@@ -556,6 +556,8 @@ export default function QualityProduction() {
 
                           editTitle="Edit quality output"
 
+                          itemLabel={`Lot ${r.lotNumber || '—'} · ${formatNumber(r.totalOutput)} KG · ${formatDate(r.date)}`}
+
                         />
 
                       </td>

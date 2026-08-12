@@ -465,12 +465,33 @@ class InventoryService {
     };
   }
 
-  async getStockSummary() {
-    const summary = await inventoryRepository.getStockSummary();
-    const branded = await this.getBrandedStockDetail();
+  async getStockSummary(options = {}) {
+    const [summary, branded] = await Promise.all([
+      inventoryRepository.getStockSummary(options),
+      this.getBrandedStockDetail(),
+    ]);
     summary.brandedStock = branded.rows;
     summary.brandedGoodsTotalPackets = branded.totalPackets;
     summary.brandedGoodsEquivalentKg = branded.totalEquivalentKg;
+    return summary;
+  }
+
+  /**
+   * Category totals + trading item balances in one round-trip pair.
+   * `trading` matches former DISTINCT ON ledger rows; `tradingStock` is { item, balance }[].
+   */
+  async getStockSummaryWithTrading() {
+    const [summary, tradingRows] = await Promise.all([
+      this.getStockSummary({ skipTradingRaw: true }),
+      inventoryRepository.getTradingStockWithBalances(),
+    ]);
+
+    summary[STOCK_CATEGORIES.TRADING] = tradingRows
+      .filter((row) => row.hasLedger)
+      .map(({ item, balance }) => ({ _id: item.id, balance }))
+      .sort((a, b) => String(a._id).localeCompare(String(b._id)));
+
+    summary.tradingStock = tradingRows.map(({ item, balance }) => ({ item, balance }));
     return summary;
   }
 

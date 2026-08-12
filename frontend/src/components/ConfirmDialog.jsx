@@ -7,6 +7,7 @@ export default function ConfirmDialog({
   onConfirm,
   title = 'Confirm action',
   message = 'Are you sure you want to proceed?',
+  itemLabel,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   variant = 'danger',
@@ -16,27 +17,47 @@ export default function ConfirmDialog({
 }) {
   const [step, setStep] = useState(1);
   const [deleteReason, setDeleteReason] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setStep(1);
       setDeleteReason('');
+      setBusy(false);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
+  const runConfirm = async () => {
+    setBusy(true);
+    try {
+      const result = await Promise.resolve(
+        onConfirm(collectDeleteReason ? deleteReason : undefined)
+      );
+      if (result === false) return;
+      onClose();
+    } catch {
+      // Keep dialog open; caller (e.g. useDataTable) already showed an error toast
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleFirstConfirm = () => {
+    if (busy) return;
     if (doubleConfirm) setStep(2);
-    else onConfirm(collectDeleteReason ? deleteReason : undefined);
+    else void runConfirm();
   };
 
   const handleFinalConfirm = () => {
-    onConfirm(collectDeleteReason ? deleteReason : undefined);
+    if (busy) return;
+    void runConfirm();
   };
 
   const isDelete = variant === 'danger';
   const step2Message = step2MessageProp ?? 'This will update stock ledger balances. The record will be moved to deleted items (admin can restore).';
+  const busyLabel = isDelete ? 'Deleting...' : 'Working...';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 overflow-y-auto">
@@ -50,6 +71,14 @@ export default function ConfirmDialog({
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {step === 1 ? message : step2Message}
             </p>
+            {itemLabel && (
+              <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50 px-3 py-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-0.5">
+                  {isDelete ? 'Record to delete' : 'Record'}
+                </p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 break-words">{itemLabel}</p>
+              </div>
+            )}
             {step === 2 && collectDeleteReason && (
               <div className="mt-3">
                 <label className="block text-sm font-medium mb-1">Delete reason (optional)</label>
@@ -59,23 +88,34 @@ export default function ConfirmDialog({
                   className="input-field w-full"
                   rows={2}
                   placeholder="Why is this record being deleted?"
+                  disabled={busy}
                 />
               </div>
+            )}
+            {busy && (
+              <p className="mt-3 text-sm font-medium text-amber-700 dark:text-amber-400">
+                {busyLabel} Please wait…
+              </p>
             )}
           </div>
         </div>
         <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
-          <button onClick={onClose} className="btn-secondary">{cancelLabel}</button>
+          <button onClick={onClose} className="btn-secondary" disabled={busy}>{cancelLabel}</button>
           {step === 1 ? (
-            <button onClick={handleFirstConfirm} className={isDelete ? 'bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium' : 'btn-primary'}>
+            <button
+              onClick={handleFirstConfirm}
+              disabled={busy}
+              className={isDelete ? 'bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg font-medium' : 'btn-primary'}
+            >
               {confirmLabel}
             </button>
           ) : (
             <button
               onClick={handleFinalConfirm}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium"
+              disabled={busy}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg font-medium"
             >
-              Yes, {confirmLabel.toLowerCase()}
+              {busy ? busyLabel : `Yes, ${confirmLabel.toLowerCase()}`}
             </button>
           )}
         </div>
@@ -88,6 +128,7 @@ export function DeleteButton({
   onDelete,
   title = 'Delete entry',
   message = 'Are you sure you want to delete this entry?',
+  itemLabel,
   step2Message = 'This will update stock ledger balances. The record will be moved to deleted items.',
   className = 'text-red-600 hover:text-red-800',
   children,
@@ -102,9 +143,10 @@ export function DeleteButton({
       <ConfirmDialog
         isOpen={open}
         onClose={() => setOpen(false)}
-        onConfirm={(reason) => { setOpen(false); onDelete(reason); }}
+        onConfirm={onDelete}
         title={title}
         message={message}
+        itemLabel={itemLabel}
         confirmLabel="Delete"
         variant="danger"
         doubleConfirm
@@ -122,6 +164,7 @@ export function EntryActions({
   deleteTitle = 'Delete entry',
   editMessage = 'You are about to edit this stock entry. Stock balances will be recalculated.',
   deleteMessage = 'Are you sure you want to delete this entry?',
+  itemLabel,
   step2Message = 'This will update stock ledger balances. The record will be moved to deleted items.',
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -136,9 +179,10 @@ export function EntryActions({
       <ConfirmDialog
         isOpen={editOpen}
         onClose={() => setEditOpen(false)}
-        onConfirm={() => { setEditOpen(false); onEdit(); }}
+        onConfirm={() => { onEdit(); }}
         title={editTitle}
         message={editMessage}
+        itemLabel={itemLabel}
         confirmLabel="Continue to edit"
         variant="warning"
         doubleConfirm
@@ -147,9 +191,10 @@ export function EntryActions({
       <ConfirmDialog
         isOpen={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        onConfirm={(reason) => { setDeleteOpen(false); onDelete(reason); }}
+        onConfirm={onDelete}
         title={deleteTitle}
         message={deleteMessage}
+        itemLabel={itemLabel}
         confirmLabel="Delete"
         variant="danger"
         doubleConfirm

@@ -2,13 +2,10 @@ import asyncHandler from '../../shared/utils/asyncHandler.js';
 import { successResponse, paginatedResponse } from '../../shared/utils/apiResponse.js';
 import { buildPagination, buildPaginationMeta } from '../../shared/utils/helpers.js';
 import inventoryService from './inventory.service.js';
-import inventoryRepository from './inventory.repository.js';
 
 export const getStockSummary = asyncHandler(async (req, res) => {
-  const summary = await inventoryService.getStockSummary();
-  // Same shape as before ({ item, balance }[]), batched instead of N+1
-  const tradingStock = await inventoryRepository.getTradingStockWithBalances();
-  successResponse(res, { ...summary, tradingStock });
+  const summary = await inventoryService.getStockSummaryWithTrading();
+  successResponse(res, summary);
 });
 
 export const getStockLedger = asyncHandler(async (req, res) => {

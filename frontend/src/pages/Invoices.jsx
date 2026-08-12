@@ -413,7 +413,8 @@ export default function Invoices() {
                         <DeleteButton
                           onDelete={(reason) => deleteItem(inv._id, reason)}
                           title="Delete invoice"
-                          message={`Are you sure you want to delete invoice ${inv.invoiceNumber}?`}
+                          message="Are you sure you want to delete this invoice?"
+                          itemLabel={`${inv.invoiceNumber} · ${inv.partyName || inv.party?.name || ''} · ${formatDate(inv.date)}`}
                           step2Message="This will remove the invoice from reports. This action cannot be undone."
                           className="text-red-600 text-sm font-medium hover:text-red-800"
                         />

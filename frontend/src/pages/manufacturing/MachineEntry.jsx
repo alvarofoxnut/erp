@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import api from '../../services/api';
-import { useDataTable } from '../../hooks/useDataTable';
+import { useDataTable, useResourceQuery } from '../../hooks/useDataTable';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { EntryActions } from '../../components/ConfirmDialog';
 import { PageHeader, Pagination, ListPageToolbar, Modal, EmptyState, FieldLabel } from '../../components/common';
@@ -19,19 +18,18 @@ export default function MachineEntry() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editRow, setEditRow] = useState(null);
-  const [lots, setLots] = useState([]);
-  const [loadingLots, setLoadingLots] = useState(false);
   const [selectedLot, setSelectedLot] = useState('');
 
-  const loadLots = useCallback(() => {
-    setLoadingLots(true);
-    api.get('/manufacturing/available-lots')
-      .then(({ data }) => setLots(data.data || []))
-      .catch(() => setLots([]))
-      .finally(() => setLoadingLots(false));
-  }, []);
+  // Prefetch on page load (same pattern as Quality WIP lots) so the modal opens with lots ready
+  const { data: lots, loading: loadingLots } = useResourceQuery('/manufacturing/available-lots');
 
-  useEffect(() => { if (modalOpen) loadLots(); }, [modalOpen, loadLots]);
+  const lotOptions = useMemo(() => {
+    const rows = Array.isArray(lots) ? lots : [];
+    if (editRow?.lotNumber && !rows.some((l) => l.lotNumber === editRow.lotNumber)) {
+      return [{ lotNumber: editRow.lotNumber, availableQty: 0 }, ...rows];
+    }
+    return rows;
+  }, [lots, editRow]);
 
   const openCreate = () => { setEditRow(null); setSelectedLot(''); setModalOpen(true); };
   const openEdit = (row) => { setEditRow(row); setSelectedLot(row.lotNumber); setModalOpen(true); };
@@ -44,7 +42,7 @@ export default function MachineEntry() {
     }
   }, [location.state, data]);
 
-  const availableQty = lots.find((l) => l.lotNumber === selectedLot)?.availableQty;
+  const availableQty = lotOptions.find((l) => l.lotNumber === selectedLot)?.availableQty;
   const editLotQty = editRow && editRow.lotNumber === selectedLot
     ? (availableQty ?? 0) + editRow.quantitySent
     : availableQty;
@@ -77,6 +75,9 @@ export default function MachineEntry() {
     'machine-entries'
   );
 
+  const showEmptyLots = !loadingLots && lotOptions.length === 0 && !editRow;
+  const showLotSelect = lotOptions.length > 0 || editRow;
+
   return (
     <div>
       <PageHeader title="Material Sent to Machine (WIP)" subtitle="Transfer raw material to work-in-progress"
@@ -104,7 +105,15 @@ export default function MachineEntry() {
                   <tr key={r._id}>
                     <td>{formatDate(r.date)}</td><td className="font-mono">{r.lotNumber}</td>
                     <td>{formatNumber(r.quantitySent)}</td>
-                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete machine entry" editTitle="Edit machine entry" /></td>
+                    <td>
+                      <EntryActions
+                        onEdit={() => openEdit(r)}
+                        onDelete={(reason) => deleteItem(r._id, reason)}
+                        deleteTitle="Delete machine entry"
+                        editTitle="Edit machine entry"
+                        itemLabel={`Lot ${r.lotNumber} · ${formatNumber(r.quantitySent)} KG · ${formatDate(r.date)}`}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -118,21 +127,20 @@ export default function MachineEntry() {
         <form onSubmit={handleSubmit} className="space-y-4" key={editRow?._id || 'new'}>
           <div>
             <FieldLabel required>Lot Number</FieldLabel>
-            {loadingLots ? <LoadingSpinner size="sm" className="py-2" /> : lots.length === 0 && !editRow ? (
+            {showEmptyLots ? (
               <p className="text-sm text-amber-600">No lots with available raw material. Add a raw purchase first.</p>
-            ) : (
+            ) : showLotSelect ? (
               <select name="lotNumber" required className="input-field" value={selectedLot}
                 onChange={(e) => setSelectedLot(e.target.value)}>
-                <option value="">Select lot number</option>
-                {lots.map((l) => (
+                <option value="">{loadingLots && lotOptions.length === 0 ? 'Loading lots…' : 'Select lot number'}</option>
+                {lotOptions.map((l) => (
                   <option key={l.lotNumber} value={l.lotNumber}>
                     {l.lotNumber} — {formatNumber(l.availableQty)} KG available
                   </option>
                 ))}
-                {editRow && !lots.find((l) => l.lotNumber === editRow.lotNumber) && (
-                  <option value={editRow.lotNumber}>{editRow.lotNumber} (current)</option>
-                )}
               </select>
+            ) : (
+              <LoadingSpinner size="sm" className="py-2" />
             )}
             {selectedLot && editLotQty != null && (
               <p className="text-xs text-gray-500 mt-1">Available for this lot: {formatNumber(editLotQty)} KG</p>
@@ -140,7 +148,7 @@ export default function MachineEntry() {
           </div>
           <div><FieldLabel required>Quantity Sent (KG)</FieldLabel><input name="quantitySent" type="number" step="0.01" min="0.01" required defaultValue={editRow?.quantitySent} className="input-field" /></div>
           <div><FieldLabel required>Date</FieldLabel><input name="date" type="date" required defaultValue={defaultDate} className="input-field" /></div>
-          <button type="submit" disabled={saving || (!editRow && lots.length === 0)} className="btn-primary w-full">{saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Entry`}</button>
+          <button type="submit" disabled={saving || (!editRow && lotOptions.length === 0)} className="btn-primary w-full">{saving ? 'Saving...' : `${editRow ? 'Update' : 'Save'} Entry`}</button>
         </form>
       </Modal>
       <ExcelImportModal {...importModalProps} />

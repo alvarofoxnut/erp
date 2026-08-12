@@ -604,61 +604,47 @@ class DamagesService {
     todayEnd.setHours(23, 59, 59, 999);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const [
-      mfgToday,
-      mfgMonth,
-      tradingToday,
-      tradingMonth,
-      mfgFyLoss,
-      tradingFyLoss,
-    ] = await Promise.all([
-      prisma.manufacturingDamage.aggregate({
-        where: { ...ACTIVE_ONLY, date: { gte: todayStart, lte: todayEnd } },
-        _sum: { totalLoss: true },
-        _count: true,
-      }),
-      prisma.manufacturingDamage.aggregate({
-        where: { ...ACTIVE_ONLY, date: { gte: monthStart, lte: todayEnd } },
-        _sum: { totalLoss: true },
-        _count: true,
-      }),
-      prisma.tradingDamage.aggregate({
-        where: { ...ACTIVE_ONLY, date: { gte: todayStart, lte: todayEnd } },
-        _sum: { totalLoss: true },
-        _count: true,
-      }),
-      prisma.tradingDamage.aggregate({
-        where: { ...ACTIVE_ONLY, date: { gte: monthStart, lte: todayEnd } },
-        _sum: { totalLoss: true },
-        _count: true,
-      }),
-      prisma.manufacturingDamage.aggregate({
-        where: { ...ACTIVE_ONLY, date: { gte: fy.start, lte: fy.end } },
-        _sum: { totalLoss: true },
-      }),
-      prisma.tradingDamage.aggregate({
-        where: { ...ACTIVE_ONLY, date: { gte: fy.start, lte: fy.end } },
-        _sum: { totalLoss: true },
-      }),
+    // One scan per table — same windows as the previous six aggregates
+    const [mfgRows, tradingRows] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT
+          COALESCE(SUM(CASE WHEN date >= ${todayStart} AND date <= ${todayEnd} THEN "totalLoss" ELSE 0 END), 0)::float AS "todayLoss",
+          COALESCE(SUM(CASE WHEN date >= ${todayStart} AND date <= ${todayEnd} THEN 1 ELSE 0 END), 0)::int AS "todayCount",
+          COALESCE(SUM(CASE WHEN date >= ${monthStart} AND date <= ${todayEnd} THEN "totalLoss" ELSE 0 END), 0)::float AS "monthLoss",
+          COALESCE(SUM(CASE WHEN date >= ${monthStart} AND date <= ${todayEnd} THEN 1 ELSE 0 END), 0)::int AS "monthCount",
+          COALESCE(SUM(CASE WHEN date >= ${fy.start} AND date <= ${fy.end} THEN "totalLoss" ELSE 0 END), 0)::float AS "fyLoss"
+        FROM "ManufacturingDamage"
+        WHERE "isDeleted" = false
+          AND date >= ${fy.start}
+          AND date <= ${fy.end}
+      `,
+      prisma.$queryRaw`
+        SELECT
+          COALESCE(SUM(CASE WHEN date >= ${todayStart} AND date <= ${todayEnd} THEN "totalLoss" ELSE 0 END), 0)::float AS "todayLoss",
+          COALESCE(SUM(CASE WHEN date >= ${todayStart} AND date <= ${todayEnd} THEN 1 ELSE 0 END), 0)::int AS "todayCount",
+          COALESCE(SUM(CASE WHEN date >= ${monthStart} AND date <= ${todayEnd} THEN "totalLoss" ELSE 0 END), 0)::float AS "monthLoss",
+          COALESCE(SUM(CASE WHEN date >= ${monthStart} AND date <= ${todayEnd} THEN 1 ELSE 0 END), 0)::int AS "monthCount",
+          COALESCE(SUM(CASE WHEN date >= ${fy.start} AND date <= ${fy.end} THEN "totalLoss" ELSE 0 END), 0)::float AS "fyLoss"
+        FROM "TradingDamage"
+        WHERE "isDeleted" = false
+          AND date >= ${fy.start}
+          AND date <= ${fy.end}
+      `,
     ]);
 
-    const mfgTodayLoss = mfgToday._sum.totalLoss || 0;
-    const mfgMonthLoss = mfgMonth._sum.totalLoss || 0;
-    const tradingTodayLoss = tradingToday._sum.totalLoss || 0;
-    const tradingMonthLoss = tradingMonth._sum.totalLoss || 0;
-    const totalDamageLoss =
-      (mfgFyLoss._sum.totalLoss || 0) + (tradingFyLoss._sum.totalLoss || 0);
+    const mfg = mfgRows[0] || {};
+    const trading = tradingRows[0] || {};
 
     return {
-      manufacturingDamageToday: mfgTodayLoss,
-      manufacturingDamageThisMonth: mfgMonthLoss,
-      tradingDamageToday: tradingTodayLoss,
-      tradingDamageThisMonth: tradingMonthLoss,
-      totalDamageLoss,
-      manufacturingDamageTodayCount: mfgToday._count,
-      manufacturingDamageMonthCount: mfgMonth._count,
-      tradingDamageTodayCount: tradingToday._count,
-      tradingDamageMonthCount: tradingMonth._count,
+      manufacturingDamageToday: Number(mfg.todayLoss) || 0,
+      manufacturingDamageThisMonth: Number(mfg.monthLoss) || 0,
+      tradingDamageToday: Number(trading.todayLoss) || 0,
+      tradingDamageThisMonth: Number(trading.monthLoss) || 0,
+      totalDamageLoss: (Number(mfg.fyLoss) || 0) + (Number(trading.fyLoss) || 0),
+      manufacturingDamageTodayCount: Number(mfg.todayCount) || 0,
+      manufacturingDamageMonthCount: Number(mfg.monthCount) || 0,
+      tradingDamageTodayCount: Number(trading.todayCount) || 0,
+      tradingDamageMonthCount: Number(trading.monthCount) || 0,
     };
   }
 

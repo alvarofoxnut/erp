@@ -77,7 +77,8 @@ export default function Items() {
                       <DeleteButton
                         onDelete={(reason) => deleteItem(item._id, reason)}
                         title="Delete item"
-                        message={`Are you sure you want to delete item "${item.name}"?`}
+                        message="Are you sure you want to delete this item?"
+                        itemLabel={`${item.name}${item.sku ? ` · SKU ${item.sku}` : ''}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </DeleteButton>

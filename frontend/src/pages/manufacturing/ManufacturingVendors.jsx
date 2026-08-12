@@ -109,7 +109,8 @@ export default function ManufacturingVendors() {
                       <DeleteButton
                         onDelete={(reason) => deleteItem(v._id, reason)}
                         title="Delete vendor"
-                        message={`Are you sure you want to delete vendor "${v.name}"?`}
+                        message="Are you sure you want to delete this vendor?"
+                        itemLabel={v.name}
                       >
                         <Trash2 className="h-4 w-4" />
                       </DeleteButton>

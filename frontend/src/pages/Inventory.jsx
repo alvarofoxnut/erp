@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -7,6 +8,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { PageHeader, SearchBar, Pagination, StatCard, EmptyState, DateRangeFilter } from '../components/common';
 import { formatDate, formatNumber, formatCurrency, STOCK_LABELS, MOVEMENT_TYPE_LABELS, REFERENCE_TYPE_LABELS, getErrorMessage } from '../utils/helpers';
 import { notifyStockUpdated } from '../utils/stockEvents';
+import { queryKeys, STOCK_STALE_MS, LIST_STALE_MS } from '../lib/queryClient';
 
 const REF_ROUTES = {
   RawPurchase: '/manufacturing/raw-purchase',
@@ -34,10 +36,7 @@ const DELETE_ENDPOINTS = {
 
 export default function Inventory() {
   const navigate = useNavigate();
-  const [summary, setSummary] = useState(null);
-  const [ledger, setLedger] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1 });
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [params, setParams] = useState({
     page: 1,
     category: '',
@@ -49,78 +48,52 @@ export default function Inventory() {
   });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editConfirm, setEditConfirm] = useState(null);
-  const [fgBatches, setFgBatches] = useState([]);
 
-  const loadSummary = useCallback(() => {
-    return Promise.all([
-      api.get('/inventory/summary'),
-      api.get('/manufacturing/finished-goods-batches'),
-    ]).then(([summaryRes, batchesRes]) => {
-      setSummary(summaryRes.data.data);
-      setFgBatches(batchesRes.data.data || []);
-    });
-  }, []);
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.inventorySummary(),
+    queryFn: async () => {
+      const { data: res } = await api.get('/inventory/summary');
+      return res.data;
+    },
+    staleTime: STOCK_STALE_MS,
+    placeholderData: (previousData) => previousData,
+  });
 
-  const loadLedger = useCallback(() => {
-    setLoading(true);
-    return api
-      .get('/inventory/ledger', { params })
-      .then((ledgerRes) => {
-        setLedger(ledgerRes.data.data);
-        setPagination(ledgerRes.data.pagination);
-      })
-      .catch((err) => toast.error(getErrorMessage(err)))
-      .finally(() => setLoading(false));
-  }, [params]);
+  const batchesQuery = useQuery({
+    queryKey: queryKeys.finishedGoodsBatches(),
+    queryFn: async () => {
+      const { data: res } = await api.get('/manufacturing/finished-goods-batches');
+      return res.data || [];
+    },
+    staleTime: STOCK_STALE_MS,
+    placeholderData: (previousData) => previousData,
+  });
 
-  /** Full refresh after delete (stock + ledger). */
-  const loadData = useCallback(() => {
-    setLoading(true);
-    Promise.all([
-      loadSummary(),
-      api.get('/inventory/ledger', { params }),
-    ])
-      .then(([, ledgerRes]) => {
-        setLedger(ledgerRes.data.data);
-        setPagination(ledgerRes.data.pagination);
-      })
-      .catch((err) => toast.error(getErrorMessage(err)))
-      .finally(() => setLoading(false));
-  }, [loadSummary, params]);
+  const ledgerQuery = useQuery({
+    queryKey: queryKeys.inventoryLedger(params),
+    queryFn: async () => {
+      const { data: res } = await api.get('/inventory/ledger', { params });
+      return {
+        rows: res.data || [],
+        pagination: res.pagination || { page: 1, totalPages: 1 },
+      };
+    },
+    staleTime: LIST_STALE_MS,
+    placeholderData: (previousData) => previousData,
+  });
 
-  const initialLoadDone = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    Promise.all([
-      loadSummary(),
-      api.get('/inventory/ledger', { params }),
-    ])
-      .then(([, ledgerRes]) => {
-        if (cancelled) return;
-        setLedger(ledgerRes.data.data);
-        setPagination(ledgerRes.data.pagination);
-        initialLoadDone.current = true;
-      })
-      .catch((err) => {
-        if (!cancelled) toast.error(getErrorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount + summary helper only
-  }, [loadSummary]);
-
-  useEffect(() => {
-    if (!initialLoadDone.current) return;
-    loadLedger();
-  }, [loadLedger]);
+  const summary = summaryQuery.data;
+  const fgBatches = batchesQuery.data || [];
+  const ledger = ledgerQuery.data?.rows || [];
+  const pagination = ledgerQuery.data?.pagination || { page: 1, totalPages: 1 };
+  const loading = ledgerQuery.isLoading && !ledgerQuery.data;
 
   const seenRefs = new Set();
-
   const updateParams = (updates) => setParams((p) => ({ ...p, ...updates }));
+
+  const refreshAll = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['inventory'] });
+  }, [queryClient]);
 
   const handleDelete = async (deleteReason) => {
     if (!deleteTarget) return;
@@ -134,7 +107,7 @@ export default function Inventory() {
       toast.success('Entry deleted and stock recalculated');
       notifyStockUpdated();
       setDeleteTarget(null);
-      loadData();
+      refreshAll();
     } catch (err) {
       toast.error(getErrorMessage(err));
     }
@@ -151,7 +124,10 @@ export default function Inventory() {
     setEditConfirm(null);
   };
 
-  if (loading && !summary) return <LoadingSpinner className="py-20" />;
+  // First visit: wait until we have something to show (summary or ledger)
+  if (!summary && summaryQuery.isLoading && loading) {
+    return <LoadingSpinner className="py-20" />;
+  }
 
   const stockCards = summary
     ? Object.entries(summary).filter(
@@ -289,7 +265,11 @@ export default function Inventory() {
           <table className="data-table">
             <thead><tr><th>Date</th><th>Category</th><th>Direction</th><th>Qty</th><th>Balance</th><th>Lot / Brand</th><th>Source</th><th>Actions</th></tr></thead>
             <tbody>
-              {ledger.length === 0 ? <tr><td colSpan={8}><EmptyState message="No stock movements" /></td></tr> : ledger.map((e) => {
+              {loading ? (
+                <tr><td colSpan={8}><LoadingSpinner className="py-10" /></td></tr>
+              ) : ledger.length === 0 ? (
+                <tr><td colSpan={8}><EmptyState message="No stock movements" /></td></tr>
+              ) : ledger.map((e) => {
                 const refKey = `${e.referenceType}-${e.referenceId}`;
                 const showActions = !seenRefs.has(refKey);
                 if (showActions) seenRefs.add(refKey);

@@ -315,8 +315,8 @@ class AccountingModuleService {
   }
 
   async getInvoices({ search, paymentStatus, invoiceType, startDate, endDate, page = 1, limit = 10 }) {
-    // Repair orphans from older deletes where invoice was not cascaded
-    await softDeleteOrphanInvoices(prisma);
+    // Background repair only — list already hides orphans via activeInvoiceWhere
+    void softDeleteOrphanInvoices(prisma).catch(() => {});
 
     const where = activeInvoiceWhere();
     if (invoiceType) where.invoiceType = invoiceType;
@@ -499,7 +499,6 @@ class AccountingModuleService {
   }
 
   async getPendingPayments() {
-    await softDeleteOrphanInvoices(prisma);
     return prisma.invoice.findMany({
       where: activeInvoiceWhere({
         paymentStatus: { in: [PAYMENT_STATUS.UNPAID, PAYMENT_STATUS.PARTIAL] },

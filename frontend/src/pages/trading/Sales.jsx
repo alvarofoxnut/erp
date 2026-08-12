@@ -124,7 +124,7 @@ export default function Sales() {
                     <td className="font-mono">{r.serialNumber}</td><td>{formatDate(r.date)}</td>
                     <td>{r.customerName}</td><td>{r.item?.name}</td>
                     <td>{formatNumber(r.quantity)}</td><td>{formatCurrency(r.rate)}</td><td>{formatCurrency(r.amount)}</td>
-                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete sale" editTitle="Edit sale" /></td>
+                    <td><EntryActions onEdit={() => openEdit(r)} onDelete={(reason) => deleteItem(r._id, reason)} deleteTitle="Delete sale" editTitle="Edit sale" itemLabel={`${r.serialNumber || ''} · ${r.customerName || 'Customer'} · ${r.item?.name || 'Item'} · ${formatNumber(r.quantity)} · ${formatDate(r.date)}`} /></td>
                   </tr>
                 ))}
               </tbody>

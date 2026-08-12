@@ -158,13 +158,16 @@ export default function BrandedPackagingTab({ lotsQualityStock = [], onRefreshLo
   };
 
   const handleDelete = async (id, deleteReason) => {
+    const toastId = toast.loading('Deleting…');
     try {
       await api.delete(`/manufacturing/packaging/${id}`, { data: { deleteReason } });
-      toast.success('Packaging transaction deleted');
+      toast.success('Packaging transaction deleted', { id: toastId });
       fetchData();
       onRefreshLots?.();
+      return true;
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      toast.error(getErrorMessage(err), { id: toastId });
+      return false;
     }
   };
 
@@ -254,9 +257,10 @@ export default function BrandedPackagingTab({ lotsQualityStock = [], onRefreshLo
                     <td>
                       <EntryActions
                         onEdit={() => openEdit(r)}
-                        onDelete={() => handleDelete(r._id || r.id)}
+                        onDelete={(reason) => handleDelete(r._id || r.id, reason)}
                         editTitle="Edit packaging transaction"
                         deleteTitle="Delete packaging transaction"
+                        itemLabel={`${r.brand?.name || 'Brand'} · Lot ${r.lotNumber || '—'} · ${formatNumber(r.quantityPackedKg)} KG · ${formatDate(r.date)}`}
                       />
                     </td>
                   </tr>

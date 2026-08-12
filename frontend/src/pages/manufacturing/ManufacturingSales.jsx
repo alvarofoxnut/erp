@@ -280,6 +280,7 @@ export default function ManufacturingSales() {
                           onDelete={(reason) => deleteItem(r._id, reason)}
                           deleteTitle="Delete manufacturing sale"
                           editTitle="Edit manufacturing sale"
+                          itemLabel={`${r.customerName || 'Customer'} · ${formatNumber(r.quantity)} KG · ${formatCurrency(r.amount)} · ${formatDate(r.date)}`}
                         />
                       </td>
                     </tr>

@@ -678,7 +678,7 @@ class InventoryRepository {
       .sort((a, b) => a.lotNumber.localeCompare(b.lotNumber));
   }
 
-  async getStockSummary() {
+  async getStockSummary({ skipTradingRaw = false } = {}) {
     const categories = Object.values(STOCK_CATEGORIES);
     const summary = {};
 
@@ -689,6 +689,10 @@ class InventoryRepository {
           return;
         }
         if (category === STOCK_CATEGORIES.TRADING) {
+          if (skipTradingRaw) {
+            summary[category] = [];
+            return;
+          }
           const tradingStock = await prisma.$queryRaw`
             SELECT DISTINCT ON ("itemId")
               "itemId" AS "_id",
@@ -803,6 +807,7 @@ class InventoryRepository {
   /**
    * Active trading items with current ledger balance in one query
    * (DISTINCT ON latest balance + LEFT JOIN so items with no movements stay at 0).
+   * hasLedger mirrors the old getStockSummary().trading rows (ledger entries only).
    */
   async getTradingStockWithBalances() {
     const rows = await prisma.$queryRaw`
@@ -814,7 +819,8 @@ class InventoryRepository {
         i.description,
         i.category,
         i."isActive",
-        COALESCE(b.balance, 0)::float AS balance
+        COALESCE(b.balance, 0)::float AS balance,
+        (b."itemId" IS NOT NULL) AS "hasLedger"
       FROM "Item" i
       LEFT JOIN (
         SELECT DISTINCT ON ("itemId")
@@ -841,6 +847,7 @@ class InventoryRepository {
         isActive: row.isActive,
       },
       balance: Number(row.balance) || 0,
+      hasLedger: Boolean(row.hasLedger),
     }));
   }
 

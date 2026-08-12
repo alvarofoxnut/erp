@@ -122,12 +122,15 @@ export default function Roles() {
   };
 
   const handleDeleteRole = async (role) => {
+    const toastId = toast.loading('Deleting…');
     try {
       await api.delete(`/roles/${role._id}`);
-      toast.success('Role deleted');
+      toast.success('Role deleted', { id: toastId });
       fetchData();
+      return true;
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      toast.error(getErrorMessage(err), { id: toastId });
+      return false;
     }
   };
 
@@ -177,7 +180,8 @@ export default function Roles() {
                           <DeleteButton
                             onDelete={() => handleDeleteRole(role)}
                             title="Delete role"
-                            message={`Are you sure you want to delete role "${role.name}"?`}
+                            message="Are you sure you want to delete this role?"
+                            itemLabel={role.name}
                             step2Message="Users assigned to this role may lose access. This action cannot be undone."
                           >
                             <Trash2 className="h-4 w-4" />

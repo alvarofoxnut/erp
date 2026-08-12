@@ -149,6 +149,7 @@ export default function Expenses({ businessUnit = 'manufacturing' }) {
                           editMessage="You are about to edit this expense. Ledger entries will be updated."
                           deleteMessage="Are you sure you want to delete this expense?"
                           step2Message="This will update ledger balances. This action cannot be undone."
+                          itemLabel={`${e.category || e.type} · ${formatCurrency(e.amount)} · ${formatDate(e.date)}`}
                         />
                       </td>
                     </tr>

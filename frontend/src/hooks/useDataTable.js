@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../services/api';
 import { getErrorMessage } from '../utils/helpers';
 import { notifyStockUpdated } from '../utils/stockEvents';
-import { queryKeys } from '../lib/queryClient';
+import { queryKeys, STOCK_STALE_MS, LIST_STALE_MS } from '../lib/queryClient';
 
 async function fetchDataTable(endpoint, params) {
   const { data: res } = await api.get(endpoint, { params });
@@ -26,6 +26,7 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
   const query = useQuery({
     queryKey,
     queryFn: () => fetchDataTable(endpoint, params),
+    staleTime: LIST_STALE_MS,
     placeholderData: (previousData) => previousData,
   });
 
@@ -126,13 +127,14 @@ export function useDataTable(endpoint, { initialParams = {}, notifyStock = true 
 
   const deleteItem = async (id, deleteReason) =>
     withWriteLock(async () => {
+      const toastId = toast.loading('Deleting…');
       try {
         await api.delete(`${endpoint}/${id}`, { data: { deleteReason } });
-        toast.success('Deleted successfully');
+        toast.success('Deleted successfully', { id: toastId });
         afterWrite();
         return true;
       } catch (err) {
-        toast.error(getErrorMessage(err));
+        toast.error(getErrorMessage(err), { id: toastId });
         return false;
       }
     });
@@ -175,6 +177,7 @@ export function useResourceQuery(endpoint) {
       const { data: res } = await api.get(endpoint);
       return res.data || [];
     },
+    staleTime: STOCK_STALE_MS,
     placeholderData: (previousData) => previousData,
   });
 

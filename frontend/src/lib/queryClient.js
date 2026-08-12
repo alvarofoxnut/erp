@@ -1,20 +1,25 @@
 import { QueryClient } from '@tanstack/react-query';
 
+/** List/options cache: revisit tabs without waiting on Render every time. */
+export const LIST_STALE_MS = 30_000;
+/** Stock panels / dashboard: slightly shorter so numbers stay reasonably fresh. */
+export const STOCK_STALE_MS = 20_000;
+
 /**
- * Conservative defaults for a data-critical ERP:
+ * ERP defaults:
  * - Memory only (no localStorage persistence)
- * - staleTime 0 → always treat data as needing a refresh on mount/focus
- * - Cached rows can still paint instantly while a refetch runs
- * - Mutations must invalidate/refetch (see useDataTable)
+ * - staleTime > 0 → tab switches reuse cache; writes invalidate explicitly
+ * - refetchOnMount only when stale (not 'always')
+ * - no refetch on every window focus (Render TTFB is expensive)
  */
 export function createAppQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        staleTime: 0,
-        gcTime: 5 * 60 * 1000,
-        refetchOnMount: 'always',
-        refetchOnWindowFocus: true,
+        staleTime: LIST_STALE_MS,
+        gcTime: 10 * 60 * 1000,
+        refetchOnMount: true,
+        refetchOnWindowFocus: false,
         refetchOnReconnect: true,
         retry: 1,
       },
@@ -29,9 +34,22 @@ export const queryKeys = {
     (params === undefined ? ['dataTable', endpoint] : ['dataTable', endpoint, params]),
   fetchOptions: (endpoint) => ['fetchOptions', endpoint],
   resource: (endpoint) => ['resource', endpoint],
+  dashboard: () => ['dashboard'],
+  inventorySummary: () => ['inventory', 'summary'],
+  inventoryLedger: (params) => ['inventory', 'ledger', params],
+  finishedGoodsBatches: () => ['inventory', 'fgBatches'],
 };
 
 /** Drop all cached API data (logout / session end). */
 export function clearAppQueryCache() {
   queryClient.clear();
+}
+
+/** After stock-affecting writes — lists stay invalidated by useDataTable; refresh stock UIs. */
+export function invalidateStockRelatedCaches() {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['resource'] }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.dashboard() }),
+    queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+  ]);
 }

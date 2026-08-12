@@ -1,74 +1,34 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js';
-import { Bar, Line } from 'react-chartjs-2';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, TrendingUp, DollarSign, AlertCircle, Factory, ShoppingBag, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { StatCard, PageHeader } from '../components/common';
 import { formatCurrency, formatNumber, STOCK_LABELS } from '../utils/helpers';
-import { STOCK_UPDATED_EVENT } from '../utils/stockEvents';
+import { queryKeys, STOCK_STALE_MS } from '../lib/queryClient';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend);
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+async function fetchDashboardData() {
+  const { data: res } = await api.get('/dashboard');
+  return res.data;
+}
 
 export default function Dashboard() {
-  const location = useLocation();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data, isLoading, isFetching, isError } = useQuery({
+    queryKey: queryKeys.dashboard(),
+    queryFn: fetchDashboardData,
+    staleTime: STOCK_STALE_MS,
+    placeholderData: (previousData) => previousData,
+  });
 
-  const fetchDashboard = useCallback(() => {
-    setLoading(true);
-    api.get('/dashboard')
-      .then(({ data: res }) => setData(res.data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, [fetchDashboard, location.key]);
-
-  useEffect(() => {
-    let timer;
-    const onStockUpdated = () => {
-      clearTimeout(timer);
-      timer = setTimeout(fetchDashboard, 500);
-    };
-
-    window.addEventListener(STOCK_UPDATED_EVENT, onStockUpdated);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener(STOCK_UPDATED_EVENT, onStockUpdated);
-    };
-  }, [fetchDashboard]);
-
-  if (loading && !data) return <LoadingSpinner className="py-20" />;
-
-  if (!data) return <div>Failed to load dashboard</div>;
-
-  const monthlySalesData = {
-    labels: (data.charts?.monthlySales || []).map((d) => MONTHS[d.month - 1]),
-    datasets: [{
-      label: 'Sales (₹)',
-      data: (data.charts?.monthlySales || []).map((d) => d.total),
-      backgroundColor: 'rgba(34, 197, 94, 0.7)',
-      borderRadius: 6,
-    }],
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.dashboard() });
   };
 
-  const productionData = {
-    labels: (data.charts?.productionTrend || []).map((d) => `${MONTHS[d._id.month - 1]} ${d._id.year}`),
-    datasets: [{
-      label: 'Production Output (KG)',
-      data: (data.charts?.productionTrend || []).map((d) => d.totalOutput),
-      borderColor: 'rgb(34, 197, 94)',
-      backgroundColor: 'rgba(34, 197, 94, 0.1)',
-      tension: 0.3,
-      fill: true,
-    }],
-  };
+  if (isLoading && !data) return <LoadingSpinner className="py-20" />;
+
+  if ((isError && !data) || !data) return <div>Failed to load dashboard</div>;
+
+  const loading = isFetching;
 
   const stockEntries = Object.entries(data.stock || {}).filter(
     ([k, v]) =>
@@ -102,7 +62,7 @@ export default function Dashboard() {
         title="Dashboard"
         subtitle="Overview of your makhana business"
         action={
-          <button onClick={fetchDashboard} className="btn-secondary text-sm" disabled={loading}>
+          <button onClick={refresh} className="btn-secondary text-sm" disabled={loading}>
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
         }
@@ -216,17 +176,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div className="card">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><ShoppingBag className="h-5 w-5" /> Monthly Sales</h3>
-          <Bar data={monthlySalesData} options={{ responsive: true, plugins: { legend: { display: false } } }} />
-        </div>
-        <div className="card">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><Factory className="h-5 w-5" /> Production Trend</h3>
-          <Line data={productionData} options={{ responsive: true, plugins: { legend: { display: false } } }} />
-        </div>
-      </div>
 
       {data.pendingPayments?.length > 0 && (
         <div className="card">

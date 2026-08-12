@@ -612,6 +612,7 @@ model StockLedger {
   @@index([category, date])
   @@index([category, itemId, date])
   @@index([category, brandId, date])
+  @@index([category, lotNumber, createdAt, id])
   @@index([lotNumber, date])
   @@index([batchId, date])
   @@index([referenceType, referenceId])

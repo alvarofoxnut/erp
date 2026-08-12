@@ -1,6 +1,5 @@
 import { prisma } from '../../config/db.js';
 import inventoryService from '../inventory/inventory.service.js';
-import inventoryRepository from '../inventory/inventory.repository.js';
 import damagesService from '../damages/damages.service.js';
 import tradingAccountService from './tradingAccount.service.js';
 import { getFinancialYear, getDateRange } from '../../shared/utils/helpers.js';
@@ -78,9 +77,8 @@ class ReportsService {
   }
 
   async getStockReport() {
-    const summary = await inventoryService.getStockSummary();
-    const tradingRows = await inventoryRepository.getTradingStockWithBalances();
-    const tradingStock = tradingRows.map(({ item, balance }) => ({
+    const summary = await inventoryService.getStockSummaryWithTrading();
+    const tradingStock = (summary.tradingStock || []).map(({ item, balance }) => ({
       itemName: item.name,
       sku: item.sku,
       unit: item.unit,
@@ -90,7 +88,8 @@ class ReportsService {
   }
 
   async getLooseStockReport() {
-    const summary = await inventoryService.getStockSummary();
+    // Trading balances unused here — skip the DISTINCT ON trading scan
+    const summary = await inventoryService.getStockSummary({ skipTradingRaw: true });
     const categories = [
       STOCK_CATEGORIES.QUALITY_6NO,
       STOCK_CATEGORIES.QUALITY_5NO,
