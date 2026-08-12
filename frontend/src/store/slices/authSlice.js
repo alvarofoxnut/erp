@@ -1,9 +1,11 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api, { clearMemoryAccessToken, setMemoryAccessToken } from '../../services/api';
+import { clearAppQueryCache } from '../../lib/queryClient';
 
 export const login = createAsyncThunk('auth/login', async (credentials, { rejectWithValue }) => {
   try {
     const { data } = await api.post('/auth/login', credentials);
+    clearAppQueryCache();
     return data.data;
   } catch (err) {
     return rejectWithValue(err.response?.data?.message || 'Login failed');
@@ -15,9 +17,14 @@ export const fetchMe = createAsyncThunk('auth/fetchMe', async (_, { rejectWithVa
     const { data } = await api.get('/auth/me');
     return data.data;
   } catch (err) {
+    const status = err.response?.status;
+    if (status === 401) {
+      clearMemoryAccessToken();
+      clearAppQueryCache();
+    }
     return rejectWithValue({
       message: err.response?.data?.message,
-      status: err.response?.status,
+      status,
     });
   }
 });
@@ -27,6 +34,7 @@ export const logout = createAsyncThunk('auth/logout', async () => {
     await api.post('/auth/logout');
   } finally {
     clearMemoryAccessToken();
+    clearAppQueryCache();
   }
 });
 
@@ -64,7 +72,6 @@ const authSlice = createSlice({
         if (action.payload?.status === 401) {
           state.user = null;
           state.isAuthenticated = false;
-          clearMemoryAccessToken();
         }
       })
       .addCase(logout.fulfilled, (state) => {

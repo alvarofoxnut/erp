@@ -33,6 +33,7 @@ import Roles from './pages/Roles';
 import AuditLogs from './pages/admin/AuditLogs';
 import DeletedRecords from './pages/admin/DeletedRecords';
 import LoadingSpinner from './components/LoadingSpinner';
+import QueryCacheSync from './components/QueryCacheSync';
 import { PERMISSIONS } from './utils/permissions';
 
 function AppRoutes() {
@@ -141,6 +142,7 @@ function App() {
   return (
     <Provider store={store}>
       <BrowserRouter basename="/admin-panel">
+        <QueryCacheSync />
         <AppRoutes />
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
       </BrowserRouter>
