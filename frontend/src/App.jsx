@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Provider, useDispatch, useSelector } from 'react-redux';
 import { Toaster } from 'react-hot-toast';
@@ -8,51 +8,52 @@ import { initTheme } from './store/slices/themeSlice';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import ManufacturingVendors from './pages/manufacturing/ManufacturingVendors';
-import Brands from './pages/manufacturing/Brands';
-import RawPurchase from './pages/manufacturing/RawPurchase';
-import MachineEntry from './pages/manufacturing/MachineEntry';
-import QualityProduction from './pages/manufacturing/QualityProduction';
-import FinishedProduction from './pages/manufacturing/FinishedProduction';
-import ManufacturingSales from './pages/manufacturing/ManufacturingSales';
-import ManufacturingDamages from './pages/manufacturing/ManufacturingDamages';
-import Items from './pages/trading/Items';
-import Parties from './pages/trading/Parties';
-import Purchases from './pages/trading/Purchases';
-import Sales from './pages/trading/Sales';
-import TradingDamages from './pages/trading/TradingDamages';
-import Inventory from './pages/Inventory';
-import Expenses from './pages/accounting/Expenses';
-import Ledgers from './pages/accounting/Ledgers';
-import BalanceSheet from './pages/BalanceSheet';
-import Invoices from './pages/Invoices';
-import Reports from './pages/Reports';
-import Users from './pages/Users';
-import Roles from './pages/Roles';
-import AuditLogs from './pages/admin/AuditLogs';
-import DeletedRecords from './pages/admin/DeletedRecords';
 import LoadingSpinner from './components/LoadingSpinner';
 import QueryCacheSync from './components/QueryCacheSync';
 import { PERMISSIONS } from './utils/permissions';
 
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ManufacturingVendors = lazy(() => import('./pages/manufacturing/ManufacturingVendors'));
+const Brands = lazy(() => import('./pages/manufacturing/Brands'));
+const RawPurchase = lazy(() => import('./pages/manufacturing/RawPurchase'));
+const MachineEntry = lazy(() => import('./pages/manufacturing/MachineEntry'));
+const QualityProduction = lazy(() => import('./pages/manufacturing/QualityProduction'));
+const FinishedProduction = lazy(() => import('./pages/manufacturing/FinishedProduction'));
+const ManufacturingSales = lazy(() => import('./pages/manufacturing/ManufacturingSales'));
+const ManufacturingDamages = lazy(() => import('./pages/manufacturing/ManufacturingDamages'));
+const Items = lazy(() => import('./pages/trading/Items'));
+const Parties = lazy(() => import('./pages/trading/Parties'));
+const Purchases = lazy(() => import('./pages/trading/Purchases'));
+const Sales = lazy(() => import('./pages/trading/Sales'));
+const TradingDamages = lazy(() => import('./pages/trading/TradingDamages'));
+const Inventory = lazy(() => import('./pages/Inventory'));
+const Expenses = lazy(() => import('./pages/accounting/Expenses'));
+const Ledgers = lazy(() => import('./pages/accounting/Ledgers'));
+const BalanceSheet = lazy(() => import('./pages/BalanceSheet'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Users = lazy(() => import('./pages/Users'));
+const Roles = lazy(() => import('./pages/Roles'));
+const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
+const DeletedRecords = lazy(() => import('./pages/admin/DeletedRecords'));
+
+function PageFallback() {
+  return (
+    <div className="min-h-[40vh] flex items-center justify-center">
+      <LoadingSpinner size="lg" />
+    </div>
+  );
+}
+
 function AppRoutes() {
   const dispatch = useDispatch();
   const { isAuthenticated } = useSelector((state) => state.auth);
-  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
     dispatch(initTheme());
-    dispatch(fetchMe()).finally(() => setInitializing(false));
+    // Do not block Login UI — ProtectedRoute waits on sessionChecked
+    dispatch(fetchMe());
   }, [dispatch]);
-
-  if (initializing) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
-  }
 
   return (
     <Routes>
@@ -62,7 +63,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Layout>
-              <Outlet />
+              <Suspense fallback={<PageFallback />}>
+                <Outlet />
+              </Suspense>
             </Layout>
           </ProtectedRoute>
         }

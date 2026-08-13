@@ -43,6 +43,8 @@ const authSlice = createSlice({
   initialState: {
     user: null,
     isAuthenticated: false,
+    /** False until first /auth/me finishes — Login can render before this. */
+    sessionChecked: false,
     loading: false,
     error: null,
   },
@@ -56,6 +58,7 @@ const authSlice = createSlice({
         state.loading = false;
         state.user = action.payload.user;
         state.isAuthenticated = true;
+        state.sessionChecked = true;
         if (action.payload.accessToken) {
           setMemoryAccessToken(action.payload.accessToken);
         }
@@ -67,16 +70,19 @@ const authSlice = createSlice({
       .addCase(fetchMe.fulfilled, (state, action) => {
         state.user = action.payload;
         state.isAuthenticated = true;
+        state.sessionChecked = true;
       })
       .addCase(fetchMe.rejected, (state, action) => {
         if (action.payload?.status === 401) {
           state.user = null;
           state.isAuthenticated = false;
         }
+        state.sessionChecked = true;
       })
       .addCase(logout.fulfilled, (state) => {
         state.user = null;
         state.isAuthenticated = false;
+        state.sessionChecked = true;
       });
   },
 });

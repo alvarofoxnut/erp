@@ -116,6 +116,11 @@ export default function Login() {
     if (isAuthenticated) navigate('/dashboard');
   }, [isAuthenticated, navigate]);
 
+  // Warm Dashboard chunk while the user types credentials
+  useEffect(() => {
+    void import('./Dashboard');
+  }, []);
+
   useEffect(() => {
     if (error) {
       toast.error(error);
