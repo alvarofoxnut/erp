@@ -1516,7 +1516,10 @@ class ManufacturingService {
       });
       return tx.finishedProduction.update({
         where: { id },
-        data: softDeletePayload(userId, deleteReason),
+        data: {
+          ...softDeletePayload(userId, deleteReason),
+          remainingQuantity: 0,
+        },
       });
     });
   }
@@ -1540,7 +1543,10 @@ class ManufacturingService {
 
       const production = await tx.finishedProduction.update({
         where: { id },
-        data: restorePayload(),
+        data: {
+          ...restorePayload(),
+          remainingQuantity: existing.finishedQuantity,
+        },
         include: createdByInclude,
       });
 
@@ -1578,6 +1584,7 @@ class ManufacturingService {
   }
 
   async getFinishedGoodsBatches() {
+    await inventoryService.repairDeletedFinishedGoods();
     return fifoAllocationService.getBatchInventory();
   }
 

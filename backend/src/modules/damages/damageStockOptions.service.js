@@ -47,7 +47,7 @@ class DamageStockOptionsService {
 
     if (inventoryType === STOCK_CATEGORIES.FINISHED_GOODS) {
       const batches = await tx.finishedProduction.findMany({
-        where: { remainingQuantity: { gt: 0 } },
+        where: { isDeleted: false, remainingQuantity: { gt: 0 } },
         orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
         select: {
           id: true,
@@ -117,9 +117,10 @@ class DamageStockOptionsService {
           lotNumber: true,
           remainingQuantity: true,
           finishedRate: true,
+          isDeleted: true,
         },
       });
-      if (!batch) throw new AppError('Selected FG batch not found', 404);
+      if (!batch || batch.isDeleted) throw new AppError('Selected FG batch not found', 404);
       return {
         inventoryType,
         lotNumber: batch.lotNumber,

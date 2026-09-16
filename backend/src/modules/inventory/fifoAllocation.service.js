@@ -8,7 +8,7 @@ class FifoAllocationService {
   async getAvailableBatches(tx = null) {
     const client = db(tx);
     return client.finishedProduction.findMany({
-      where: { remainingQuantity: { gt: 0 } },
+      where: { isDeleted: false, remainingQuantity: { gt: 0 } },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true,
@@ -26,7 +26,7 @@ class FifoAllocationService {
     const client = db(tx);
     const agg = await client.finishedProduction.aggregate({
       _sum: { remainingQuantity: true },
-      where: { remainingQuantity: { gt: 0 } },
+      where: { isDeleted: false, remainingQuantity: { gt: 0 } },
     });
     return round2(agg._sum.remainingQuantity || 0);
   }
@@ -86,10 +86,10 @@ class FifoAllocationService {
     for (const alloc of allocations) {
       const batch = await client.finishedProduction.findUnique({
         where: { id: alloc.batchId },
-        select: { remainingQuantity: true },
+        select: { remainingQuantity: true, isDeleted: true, batchNumber: true },
       });
-      if (!batch) {
-        throw new AppError(`Batch not found: ${alloc.batchId}`, 404);
+      if (!batch || batch.isDeleted) {
+        throw new AppError(`Batch not found: ${alloc.batchNumber || alloc.batchId}`, 404);
       }
       const newRemaining = round2(batch.remainingQuantity - alloc.quantity);
       if (newRemaining < 0) {
@@ -112,6 +112,11 @@ class FifoAllocationService {
     });
 
     for (const alloc of allocations) {
+      const batch = await client.finishedProduction.findUnique({
+        where: { id: alloc.batchId },
+        select: { isDeleted: true },
+      });
+      if (!batch || batch.isDeleted) continue;
       await client.finishedProduction.update({
         where: { id: alloc.batchId },
         data: {
@@ -168,6 +173,7 @@ class FifoAllocationService {
   async getBatchInventory(tx = null) {
     const client = db(tx);
     const batches = await client.finishedProduction.findMany({
+      where: { isDeleted: false },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,

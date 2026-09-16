@@ -589,9 +589,10 @@ class InventoryRepository {
   async getFinishedGoodsTotalFromBatches(tx = null) {
     const client = db(tx);
     const agg = await client.finishedProduction.aggregate({
+      where: { isDeleted: false, remainingQuantity: { gt: 0 } },
       _sum: { remainingQuantity: true },
     });
-    return Number(agg._sum.remainingQuantity ?? 0);
+    return Math.round(Number(agg._sum.remainingQuantity ?? 0) * 100) / 100;
   }
 
   async getLatestBatchBalancesAsOf(asOfDate, tx = null) {
@@ -605,6 +606,9 @@ class InventoryRepository {
       WHERE category = ${STOCK_CATEGORIES.FINISHED_GOODS}::"StockCategory"
         AND "batchId" IS NOT NULL
         AND date <= ${end}
+        AND "batchId" IN (
+          SELECT id FROM "FinishedProduction" WHERE "isDeleted" = false
+        )
       ORDER BY "batchId", date DESC, "createdAt" DESC, id DESC
     `;
     return rows

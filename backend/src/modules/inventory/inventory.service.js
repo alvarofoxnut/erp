@@ -5,6 +5,7 @@ import { STOCK_CATEGORIES, STOCK_MOVEMENT_TYPES } from '../../shared/constants/i
 import AppError from '../../shared/utils/AppError.js';
 import { validateOutboundCapacity } from './stockValidation.js';
 import { withTransaction as runTransaction } from '../../shared/utils/transaction.js';
+import logger from '../../shared/utils/logger.js';
 
 class InventoryService {
   async recordPurchase(data, tx) {
@@ -466,6 +467,7 @@ class InventoryService {
   }
 
   async getStockSummary(options = {}) {
+    await this.repairDeletedFinishedGoods();
     const [summary, branded] = await Promise.all([
       inventoryRepository.getStockSummary(options),
       this.getBrandedStockDetail(),
@@ -532,6 +534,50 @@ class InventoryService {
       tx,
       options
     );
+  }
+
+  /**
+   * Older deletes hid the production in the list but left remainingQuantity
+   * and sometimes stock-ledger lines. Replay that cleanup once so live stock
+   * is only active batches.
+   */
+  async repairDeletedFinishedGoods() {
+    if (this._fgRepairDone) return;
+    if (!this._fgRepair) {
+      this._fgRepair = this._repairDeletedFinishedGoods()
+        .then(() => {
+          this._fgRepairDone = true;
+        })
+        .catch((err) => {
+          this._fgRepair = null;
+          throw err;
+        });
+    }
+    return this._fgRepair;
+  }
+
+  async _repairDeletedFinishedGoods() {
+    const deleted = await prisma.finishedProduction.findMany({
+      where: { isDeleted: true },
+      select: { id: true, remainingQuantity: true },
+    });
+    if (!deleted.length) return;
+
+    for (const batch of deleted) {
+      await inventoryRepository.deleteMovementsByReference(
+        'FinishedProduction',
+        batch.id,
+        null,
+        { skipValidation: true }
+      );
+      if (batch.remainingQuantity !== 0) {
+        await prisma.finishedProduction.update({
+          where: { id: batch.id },
+          data: { remainingQuantity: 0 },
+        });
+      }
+    }
+    logger.info(`Repaired ${deleted.length} deleted finished-production batch(es)`);
   }
 
   async getAvailableRawMaterialLots() {

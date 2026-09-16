@@ -26,6 +26,7 @@ import auditRoutes from './modules/audit/audit.routes.js';
 import importRoutes from './modules/import/import.routes.js';
 import deletedRoutes from './modules/deleted/deletedRecords.routes.js';
 import { seedDefaultRoles } from './config/seedRoles.js';
+import inventoryService from './modules/inventory/inventory.service.js';
 import { corsOriginDelegate, getAllowedOrigins } from './shared/utils/corsOrigins.js';
 import { getCookieDeploymentMode } from './shared/utils/cookieOptions.js';
 
@@ -41,6 +42,7 @@ if (process.env.NODE_ENV === 'production') {
 
 connectDB().then(async () => {
   await seedDefaultRoles();
+  await inventoryService.repairDeletedFinishedGoods();
 }).catch((err) => logger.error(err.message));
 
 app.use(correlationId);
