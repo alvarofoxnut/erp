@@ -9,6 +9,7 @@ import { formatDate, formatCurrency, formatNumber } from '../utils/helpers';
 import { DeleteButton } from '../components/ConfirmDialog';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import { queryClient } from '../lib/queryClient';
 
 export default function Invoices() {
   const { type } = useParams();
@@ -25,6 +26,7 @@ export default function Invoices() {
   const [uninvoicedPurchases, setUninvoicedPurchases] = useState({ tradingPurchases: [], rawPurchases: [] });
   const [loadingUninvoiced, setLoadingUninvoiced] = useState(true);
   const [selectedEntry, setSelectedEntry] = useState(null);
+  const [bankAccounts, setBankAccounts] = useState([]);
 
   const loadUninvoicedSales = () => {
     setLoadingUninvoiced(true);
@@ -41,6 +43,19 @@ export default function Invoices() {
       .catch(() => setUninvoicedPurchases({ tradingPurchases: [], rawPurchases: [] }))
       .finally(() => setLoadingUninvoiced(false));
   };
+
+  useEffect(() => {
+    if (!modalOpen && !paymentModal) return undefined;
+    let cancelled = false;
+    api.get('/accounting/bank-accounts', { params: { active: 'true', limit: 100 } })
+      .then(({ data: res }) => {
+        if (!cancelled) setBankAccounts(res.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBankAccounts([]);
+      });
+    return () => { cancelled = true; };
+  }, [modalOpen, paymentModal]);
 
   useEffect(() => {
     updateParams({ invoiceType: invoiceTab, page: 1 });
@@ -82,7 +97,7 @@ export default function Invoices() {
     reference: fd.get('reference'),
     amount: parseFloat(fd.get('amount')),
     paidAmount: parseFloat(fd.get('paidAmount') || 0),
-    paymentMode: fd.get('paymentMode'),
+    paymentAccount: fd.get('paymentAccount') || 'cash',
     totalQuantity: parseFloat(fd.get('totalQuantity') || 0),
     contactDetails: { phone: fd.get('phone'), email: fd.get('email'), address: fd.get('address') },
     gstDetails: { gstRate: parseFloat(fd.get('gstRate') || 0), cgst: 0, sgst: 0, igst: 0 },
@@ -133,15 +148,45 @@ export default function Invoices() {
 
   const handlePayment = async (e) => {
     e.preventDefault();
-    const paidAmount = parseFloat(new FormData(e.target).get('paidAmount'));
+    const fd = new FormData(e.target);
+    const paidAmount = parseFloat(fd.get('paidAmount'));
     try {
-      await api.patch(`/accounting/invoices/${paymentModal._id}/payment`, { paidAmount });
+      await api.patch(`/accounting/invoices/${paymentModal._id}/payment`, {
+        paidAmount,
+        paymentAccount: fd.get('paymentAccount') || 'cash',
+      });
       toast.success('Payment updated');
       setPaymentModal(null);
       fetchData();
+      queryClient.invalidateQueries({ queryKey: ['ledgers'] });
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed');
     }
+  };
+
+  const paymentAccountValue = (record) => record?.bankAccount?._id || record?.bankAccountId || 'cash';
+
+  const PaymentAccountSelect = ({ defaultValue = 'cash', extraAccount = null }) => {
+    const options = [...bankAccounts];
+    if (extraAccount?._id && !options.some((account) => account._id === extraAccount._id)) {
+      options.unshift(extraAccount);
+    }
+    return (
+      <div>
+        <FieldLabel required>Payment Account</FieldLabel>
+        <select name="paymentAccount" defaultValue={defaultValue} className="input-field" required>
+          <option value="cash">Cash</option>
+          {options.map((account) => (
+            <option key={account._id} value={account._id}>
+              {account.name}{account.bankName ? ` · ${account.bankName}` : ''} ({formatCurrency(account.ledger?.currentBalance ?? account.currentBalance)})
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-gray-500">
+          {isCustomer ? 'Receipts credit the selected account.' : 'Payments debit the selected account.'}
+        </p>
+      </div>
+    );
   };
 
   const handleExport = () => exportFilteredList(
@@ -391,12 +436,14 @@ export default function Invoices() {
         <>
           <div className="table-container">
             <table className="data-table">
-              <thead><tr><th>Invoice</th><th>Date</th><th>Party</th><th>Qty</th><th>Total Amount</th><th>Paid</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Date</th><th>Party</th><th>Qty</th><th>Total Amount</th><th>Paid</th><th>Account</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {data.length === 0 ? <tr><td colSpan={9}><EmptyState /></td></tr> : data.map((inv) => (
+                {data.length === 0 ? <tr><td colSpan={10}><EmptyState /></td></tr> : data.map((inv) => (
                   <tr key={inv._id}>
                     <td className="font-mono">{inv.invoiceNumber}</td><td>{formatDate(inv.date)}</td><td>{inv.partyName}</td>
-                    <td>{inv.totalQuantity}</td><td>{formatCurrency(inv.amount)}</td><td>{formatCurrency(inv.paidAmount)}</td><td>{formatCurrency(inv.dueAmount)}</td>
+                    <td>{inv.totalQuantity}</td><td>{formatCurrency(inv.amount)}</td><td>{formatCurrency(inv.paidAmount)}</td>
+                    <td>{inv.bankAccount?.name || 'Cash'}</td>
+                    <td>{formatCurrency(inv.dueAmount)}</td>
                     <td><span className={`px-2 py-1 text-xs rounded-full capitalize ${statusColor[inv.paymentStatus]}`}>{inv.paymentStatus}</span></td>
                     <td>
                       <div className="flex gap-3 items-center flex-wrap">
@@ -438,10 +485,12 @@ export default function Invoices() {
             ? `Invoice for ${selectedEntry.serialNumber || selectedEntry.lotNumber}`
             : `Create ${isCustomer ? 'Customer' : 'Vendor'} Invoice`}
       >
-        <form onSubmit={handleSubmit} className="space-y-4" key={editInvoice?._id || selectedEntry?._id || invoiceTab}>
+        <form onSubmit={handleSubmit} className="space-y-4" key={`${editInvoice?._id || selectedEntry?._id || invoiceTab}-${bankAccounts.length}`}>
           <div className="form-grid-2">
             <div><FieldLabel required>Date</FieldLabel><input name="date" type="date" required defaultValue={entryDefaults.date || new Date().toISOString().split('T')[0]} className="input-field" /></div>
-            <div><label className="block text-sm mb-1">Payment Mode</label><select name="paymentMode" defaultValue={entryDefaults.paymentMode || 'cash'} className="input-field"><option value="cash">Cash</option><option value="bank">Bank</option><option value="upi">UPI</option><option value="credit">Credit</option></select></div>
+            <div>
+              <PaymentAccountSelect defaultValue={paymentAccountValue(editInvoice)} extraAccount={editInvoice?.bankAccount} />
+            </div>
           </div>
           <div><FieldLabel required>{partyLabel}</FieldLabel><input name="partyName" required defaultValue={entryDefaults.partyName} className="input-field" /></div>
           <div><label className="block text-sm mb-1">{isCustomer ? 'Sale' : 'Purchase'} Reference</label><input name="reference" defaultValue={entryDefaults.reference} className="input-field" readOnly={!!selectedEntry && !editInvoice} /></div>
@@ -463,9 +512,10 @@ export default function Invoices() {
       </Modal>
 
       <Modal isOpen={!!paymentModal} onClose={() => setPaymentModal(null)} title="Update Payment">
-        <form onSubmit={handlePayment} className="space-y-4">
+        <form onSubmit={handlePayment} className="space-y-4" key={`${paymentModal?._id}-${bankAccounts.length}`}>
           <p className="text-sm text-gray-500">Invoice: {paymentModal?.invoiceNumber} · Total: {formatCurrency(paymentModal?.amount)}</p>
           <div><FieldLabel required>Paid Amount (₹)</FieldLabel><input name="paidAmount" type="number" step="0.01" required defaultValue={paymentModal?.paidAmount} className="input-field" /></div>
+          <PaymentAccountSelect defaultValue={paymentAccountValue(paymentModal)} extraAccount={paymentModal?.bankAccount} />
           <button type="submit" className="btn-primary w-full">Update Payment</button>
         </form>
       </Modal>

@@ -98,6 +98,11 @@ export async function softDeleteOrphanInvoices(prismaClient, userId = null, dele
     where: { id: { in: orphans.map((o) => o.id) } },
     data: softDeletePayload(userId, deleteReason),
   });
+  const { default: accountingService } = await import('../../modules/accounting/accounting.service.js');
+  for (const orphan of orphans) {
+    await accountingService.deleteLedgerEntriesByReference('Invoice', orphan.id, prismaClient);
+  }
+  await accountingService.refreshBankAccountBalances(prismaClient);
   return orphans.length;
 }
 

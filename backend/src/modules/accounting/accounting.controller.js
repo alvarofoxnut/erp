@@ -1,5 +1,6 @@
 import { body } from 'express-validator';
 import accountingModuleService from './accountingModule.service.js';
+import bankAccountService from './bankAccount.service.js';
 import asyncHandler from '../../shared/utils/asyncHandler.js';
 import { successResponse, paginatedResponse } from '../../shared/utils/apiResponse.js';
 import { buildPagination, buildPaginationMeta, getDateRange } from '../../shared/utils/helpers.js';
@@ -106,7 +107,7 @@ export const getInvoices = asyncHandler(async (req, res) => {
 });
 
 export const updateInvoicePayment = asyncHandler(async (req, res) => {
-  const invoice = await accountingModuleService.updateInvoicePayment(req.params.id, req.body);
+  const invoice = await accountingModuleService.updateInvoicePayment(req.params.id, req.body, req.user._id);
   successResponse(res, invoice, 'Payment updated');
 });
 
@@ -179,4 +180,40 @@ export const exportBalanceSheet = asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename=balance-sheet.xlsx');
   res.send(buffer);
+});
+
+export const bankAccountValidation = [
+  body('name').trim().notEmpty().withMessage('Account name is required'),
+  body('openingBalance').optional().isFloat(),
+  body('bankName').optional().trim(),
+  body('accountNumber').optional().trim(),
+  body('ifsc').optional().trim(),
+  body('notes').optional().trim(),
+  body('isActive').optional().isBoolean(),
+];
+
+export const getBankAccounts = asyncHandler(async (req, res) => {
+  const { page, limit } = buildPagination(req.query.page, req.query.limit || 100);
+  const { accounts, total } = await bankAccountService.list({
+    search: req.query.search,
+    active: req.query.active,
+    page,
+    limit,
+  });
+  paginatedResponse(res, accounts, buildPaginationMeta(total, page, limit));
+});
+
+export const createBankAccount = asyncHandler(async (req, res) => {
+  const account = await bankAccountService.create(req.body, req.user._id);
+  successResponse(res, account, 'Bank account created', 201);
+});
+
+export const updateBankAccount = asyncHandler(async (req, res) => {
+  const account = await bankAccountService.update(req.params.id, req.body, req.user._id);
+  successResponse(res, account, 'Bank account updated');
+});
+
+export const deleteBankAccount = asyncHandler(async (req, res) => {
+  await bankAccountService.remove(req.params.id);
+  successResponse(res, null, 'Bank account deleted');
 });

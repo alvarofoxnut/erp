@@ -17,6 +17,7 @@ import {
   Shield,
   ScrollText,
   Trash2,
+  Landmark,
   Warehouse,
   Scale,
   Receipt,
@@ -144,6 +145,8 @@ const navItems = [
       { path: '/users', label: 'Users', icon: Users, permission: PERMISSIONS.USERS_READ },
 
       { path: '/roles', label: 'Roles & Permissions', icon: Shield, permission: PERMISSIONS.ROLES_READ },
+
+      { path: '/accounts', label: 'Accounts', icon: Landmark, adminOnly: true },
 
       { path: '/audit-logs', label: 'Audit Logs', icon: ScrollText, adminOnly: true },
 

@@ -1,13 +1,16 @@
 import { Router } from 'express';
+import { body } from 'express-validator';
 import {
   createExpense, getExpenses, getExpenseSummary, updateExpense, deleteExpense,
   createInvoice, getInvoices, getInvoice, updateInvoice, updateInvoicePayment, deleteInvoice, getPendingPayments, getUninvoicedSales, getUninvoicedPurchases,
   getLedgers, getLedgerEntries, getBalanceSheet, exportBalanceSheet,
   expenseValidation, expenseUpdateValidation, invoiceValidation, invoiceUpdateValidation,
+  getBankAccounts, createBankAccount, updateBankAccount, deleteBankAccount,
+  bankAccountValidation,
 } from './accounting.controller.js';
-import { protect, authorize } from '../../shared/middleware/auth.js';
+import { protect, authorize, authorizeRole } from '../../shared/middleware/auth.js';
 import { validate } from '../../shared/middleware/validate.js';
-import { PERMISSIONS } from '../../shared/constants/index.js';
+import { PERMISSIONS, ROLES } from '../../shared/constants/index.js';
 import { auditLog } from '../../shared/middleware/auditLog.js';
 
 const router = Router();
@@ -30,6 +33,11 @@ router.get('/invoices/:id', authorize(R.INVOICES_READ), getInvoice);
 router.put('/invoices/:id', authorize(R.INVOICES_WRITE), invoiceUpdateValidation, validate, auditLog('update', 'invoice'), updateInvoice);
 router.patch('/invoices/:id/payment', authorize(R.INVOICES_WRITE), auditLog('update', 'invoicePayment'), updateInvoicePayment);
 router.delete('/invoices/:id', authorize(R.INVOICES_WRITE), auditLog('delete', 'invoice'), deleteInvoice);
+
+router.get('/bank-accounts', authorize(R.INVOICES_READ, R.INVOICES_WRITE, R.LEDGERS_READ), getBankAccounts);
+router.post('/bank-accounts', authorizeRole(ROLES.ADMIN), bankAccountValidation, validate, auditLog('create', 'bankAccount'), createBankAccount);
+router.put('/bank-accounts/:id', authorizeRole(ROLES.ADMIN), bankAccountValidation, validate, auditLog('update', 'bankAccount'), updateBankAccount);
+router.delete('/bank-accounts/:id', authorizeRole(ROLES.ADMIN), auditLog('delete', 'bankAccount'), deleteBankAccount);
 
 router.get('/ledgers', authorize(R.LEDGERS_READ), getLedgers);
 router.get('/ledgers/:id/entries', authorize(R.LEDGERS_READ), getLedgerEntries);

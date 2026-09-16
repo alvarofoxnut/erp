@@ -1,5 +1,6 @@
 import { prisma } from '../../config/db.js';
 import accountingService from './accounting.service.js';
+import bankAccountService from './bankAccount.service.js';
 import balanceSheetService from './balanceSheet.service.js';
 import AppError from '../../shared/utils/AppError.js';
 import { PAYMENT_STATUS } from '../../shared/constants/index.js';
@@ -261,11 +262,7 @@ class AccountingModuleService {
 
     const invoiceNumber = data.invoiceNumber || (await this.generateInvoiceNumber(invoiceType));
     const paidAmount = data.paidAmount || 0;
-    const dueAmount = amount - paidAmount;
-
-    let paymentStatus = PAYMENT_STATUS.UNPAID;
-    if (paidAmount >= amount) paymentStatus = PAYMENT_STATUS.PAID;
-    else if (paidAmount > 0) paymentStatus = PAYMENT_STATUS.PARTIAL;
+    const paymentFields = this.resolvePaymentFields(amount, paidAmount);
 
     const totalQuantity = canonical.totalQuantity;
     const {
@@ -276,41 +273,65 @@ class AccountingModuleService {
       rawPurchase,
       party,
       date,
+      paymentAccount,
+      bankAccountId,
+      paymentMode,
+      paidAmount: _paid,
+      dueAmount: _due,
+      paymentStatus: _status,
+      rate: _rate,
+      phone: _phone,
+      email: _email,
+      address: _address,
+      itemDescription: _itemDescription,
+      gstRate: _gstRate,
+      invoiceNumber: _invoiceNumber,
       ...rest
     } = data;
 
-    return prisma.invoice.create({
-      data: {
-        ...rest,
-        amount,
-        date: new Date(date),
-        invoiceType,
-        partyName: canonical.partyName ?? rest.partyName,
-        partyId: canonical.partyId ?? party ?? rest.partyId ?? null,
-        tradingSaleId: tradingSale ?? null,
-        manufacturingSaleId: manufacturingSale ?? null,
-        tradingPurchaseId: tradingPurchase ?? null,
-        rawPurchaseId: rawPurchase ?? null,
-        invoiceNumber,
-        dueAmount,
-        paymentStatus,
-        totalQuantity,
-        createdById: userId,
-        items: items?.length
-          ? {
-              create: items.map((item) => ({
-                description: item.description,
-                quantity: item.quantity,
-                rate: item.rate,
-                amount: item.amount,
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        items: true,
-        party: { select: { name: true } },
-      },
+    return withTransaction(async (tx) => {
+      const accountFields = await bankAccountService.resolvePaymentAccount(
+        { paymentAccount, bankAccountId, paymentMode, paidAmount: paymentFields.paidAmount },
+        tx
+      );
+
+      const invoice = await tx.invoice.create({
+        data: {
+          ...rest,
+          amount,
+          date: new Date(date),
+          invoiceType,
+          partyName: canonical.partyName ?? rest.partyName,
+          partyId: canonical.partyId ?? party ?? rest.partyId ?? null,
+          tradingSaleId: tradingSale ?? null,
+          manufacturingSaleId: manufacturingSale ?? null,
+          tradingPurchaseId: tradingPurchase ?? null,
+          rawPurchaseId: rawPurchase ?? null,
+          invoiceNumber,
+          ...paymentFields,
+          ...accountFields,
+          totalQuantity,
+          createdById: userId,
+          items: items?.length
+            ? {
+                create: items.map((item) => ({
+                  description: item.description,
+                  quantity: item.quantity,
+                  rate: item.rate,
+                  amount: item.amount,
+                })),
+              }
+            : undefined,
+        },
+        include: {
+          items: true,
+          party: { select: { name: true } },
+          bankAccount: { select: { id: true, name: true } },
+        },
+      });
+
+      await accountingService.syncInvoiceAccountMovement(invoice, userId, tx);
+      return invoice;
     });
   }
 
@@ -334,7 +355,7 @@ class AccountingModuleService {
     const [invoices, total] = await Promise.all([
       prisma.invoice.findMany({
         where,
-        include: { party: { select: { name: true } } },
+        include: { party: { select: { name: true } }, bankAccount: { select: { id: true, name: true } } },
         orderBy: { date: 'desc' },
         skip,
         take: limit,
@@ -351,6 +372,7 @@ class AccountingModuleService {
       include: {
         items: true,
         party: { select: { id: true, name: true } },
+        bankAccount: { select: { id: true, name: true, bankName: true, currentBalance: true, isActive: true } },
       },
     });
     if (!invoice) throw new AppError('Invoice not found', 404);
@@ -406,6 +428,12 @@ class AccountingModuleService {
       rawPurchase,
       invoiceNumber,
       invoiceType,
+      paymentAccount,
+      bankAccountId,
+      paymentMode,
+      paidAmount: _paid,
+      dueAmount: _due,
+      paymentStatus: _status,
       ...rest
     } = data;
 
@@ -414,10 +442,21 @@ class AccountingModuleService {
         await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
       }
 
+      const accountFields = await bankAccountService.resolvePaymentAccount(
+        {
+          paymentAccount: paymentAccount ?? bankAccountId ?? (paymentMode === 'bank' ? existing.bankAccountId : (paymentMode || (existing.bankAccountId || 'cash'))),
+          bankAccountId: bankAccountId ?? existing.bankAccountId,
+          paymentMode: paymentMode ?? existing.paymentMode,
+          paidAmount: paymentFields.paidAmount,
+        },
+        tx
+      );
+
       const updateData = {
         amount,
         totalQuantity,
         ...paymentFields,
+        ...accountFields,
       };
 
       if (date !== undefined) updateData.date = new Date(date);
@@ -426,7 +465,6 @@ class AccountingModuleService {
         updateData.partyId = rest.party ?? rest.partyId ?? null;
       }
       if (rest.reference !== undefined) updateData.reference = rest.reference;
-      if (rest.paymentMode !== undefined) updateData.paymentMode = rest.paymentMode;
       if (rest.contactDetails !== undefined) updateData.contactDetails = rest.contactDetails;
       if (rest.gstDetails !== undefined) updateData.gstDetails = rest.gstDetails;
       if (rest.notes !== undefined) updateData.notes = rest.notes;
@@ -442,14 +480,17 @@ class AccountingModuleService {
         };
       }
 
-      return tx.invoice.update({
+      const invoice = await tx.invoice.update({
         where: { id },
         data: updateData,
         include: {
           items: true,
           party: { select: { name: true } },
+          bankAccount: { select: { id: true, name: true } },
         },
       });
+      await accountingService.syncInvoiceAccountMovement(invoice, existing.createdById, tx);
+      return invoice;
     });
   }
 
@@ -459,6 +500,8 @@ class AccountingModuleService {
 
     await withTransaction(async (tx) => {
       await softDeleteInvoice(tx, { id }, userId, deleteReason);
+      await accountingService.deleteLedgerEntriesByReference('Invoice', id, tx);
+      await accountingService.refreshBankAccountBalances(tx);
     });
   }
 
@@ -466,13 +509,17 @@ class AccountingModuleService {
     const invoice = await prisma.invoice.findUnique({ where: { id } });
     assertIsDeleted(invoice, 'Invoice');
 
-    return prisma.invoice.update({
-      where: { id },
-      data: restorePayload(),
+    return withTransaction(async (tx) => {
+      const restored = await tx.invoice.update({
+        where: { id },
+        data: restorePayload(),
+      });
+      await accountingService.syncInvoiceAccountMovement(restored, restored.createdById, tx);
+      return restored;
     });
   }
 
-  async updateInvoicePayment(id, { paidAmount }) {
+  async updateInvoicePayment(id, { paidAmount, paymentAccount, bankAccountId, paymentMode }, userId) {
     const invoice = await prisma.invoice.findUnique({ where: { id } });
     assertNotDeleted(invoice, 'Invoice');
 
@@ -488,13 +535,28 @@ class AccountingModuleService {
 
     const paymentFields = this.resolvePaymentFields(canonical.amount, paidAmount);
 
-    return prisma.invoice.update({
-      where: { id },
-      data: {
-        amount: canonical.amount,
-        totalQuantity: canonical.totalQuantity,
-        ...paymentFields,
-      },
+    return withTransaction(async (tx) => {
+      const accountFields = await bankAccountService.resolvePaymentAccount(
+        {
+          paymentAccount: paymentAccount ?? bankAccountId ?? invoice.bankAccountId ?? (invoice.paymentMode === 'bank' ? null : 'cash'),
+          bankAccountId: bankAccountId ?? invoice.bankAccountId,
+          paymentMode: paymentMode ?? invoice.paymentMode,
+          paidAmount: paymentFields.paidAmount,
+        },
+        tx
+      );
+
+      const updated = await tx.invoice.update({
+        where: { id },
+        data: {
+          amount: canonical.amount,
+          totalQuantity: canonical.totalQuantity,
+          ...paymentFields,
+          ...accountFields,
+        },
+      });
+      await accountingService.syncInvoiceAccountMovement(updated, userId || invoice.createdById, tx);
+      return updated;
     });
   }
 

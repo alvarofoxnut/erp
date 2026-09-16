@@ -132,6 +132,7 @@ model User {
   brandsCreated             Brand[]                  @relation("BrandCreatedBy")
   packagingTransactionsCreated PackagingTransaction[] @relation("PackagingCreatedBy")
   inventoryAuditLogs        InventoryAuditLog[]
+  bankAccountsCreated       BankAccount[]            @relation("BankAccountCreatedBy")
 
   @@index([role])
 }
@@ -630,9 +631,10 @@ model Ledger {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  party    Party?        @relation(fields: [partyId], references: [id])
-  entries  LedgerEntry[]
-  expenses Expense[]
+  party       Party?        @relation(fields: [partyId], references: [id])
+  entries     LedgerEntry[]
+  expenses    Expense[]
+  bankAccount BankAccount?
 
   @@unique([name, type, businessUnit])
   @@index([type])
@@ -707,6 +709,7 @@ model Invoice {
   gstDetails          Json?
   contactDetails      Json?
   paymentMode         InvoicePaymentMode @default(cash)
+  bankAccountId       String?
   paidAmount          Float              @default(0)
   dueAmount           Float              @default(0)
   paymentStatus       PaymentStatus      @default(unpaid)
@@ -720,6 +723,7 @@ model Invoice {
   updatedAt           DateTime           @updatedAt
 
   party             Party?             @relation(fields: [partyId], references: [id])
+  bankAccount       BankAccount?       @relation(fields: [bankAccountId], references: [id])
   tradingSale       Sale?              @relation(fields: [tradingSaleId], references: [id])
   manufacturingSale ManufacturingSale? @relation(fields: [manufacturingSaleId], references: [id])
   tradingPurchase   Purchase?          @relation(fields: [tradingPurchaseId], references: [id])
@@ -729,6 +733,29 @@ model Invoice {
   @@index([date])
   @@index([paymentStatus])
   @@index([invoiceType])
+  @@index([bankAccountId])
+}
+
+model BankAccount {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  bankName       String?
+  accountNumber  String?
+  ifsc           String?
+  openingBalance Float    @default(0)
+  currentBalance Float    @default(0)
+  ledgerId       String   @unique
+  isActive       Boolean  @default(true)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  ledger    Ledger    @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  createdBy User?     @relation("BankAccountCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  invoices  Invoice[]
+
+  @@index([isActive])
 }
 
 model InvoiceLineItem {

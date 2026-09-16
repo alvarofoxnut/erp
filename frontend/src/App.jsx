@@ -36,6 +36,7 @@ const Users = lazy(() => import('./pages/Users'));
 const Roles = lazy(() => import('./pages/Roles'));
 const AuditLogs = lazy(() => import('./pages/admin/AuditLogs'));
 const DeletedRecords = lazy(() => import('./pages/admin/DeletedRecords'));
+const Accounts = lazy(() => import('./pages/admin/Accounts'));
 
 function PageFallback() {
   return (
@@ -132,6 +133,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute roles={['admin']}>
               <DeletedRecords />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="accounts"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <Accounts />
             </ProtectedRoute>
           }
         />

@@ -525,10 +525,156 @@ class AccountingService {
     );
   }
 
+  invoiceBusinessUnit(invoice) {
+    if (invoice.manufacturingSaleId || invoice.rawPurchaseId) return BUSINESS_UNITS.MANUFACTURING;
+    if (invoice.tradingSaleId || invoice.tradingPurchaseId) return BUSINESS_UNITS.TRADING;
+    return null;
+  }
+
+  invoiceIsLinked(invoice) {
+    return Boolean(
+      invoice.tradingSaleId
+      || invoice.manufacturingSaleId
+      || invoice.tradingPurchaseId
+      || invoice.rawPurchaseId
+    );
+  }
+
+  async refreshBankAccountBalances(tx = null) {
+    const client = db(tx);
+    const accounts = await client.bankAccount.findMany({
+      select: { id: true, ledgerId: true, currentBalance: true },
+    });
+    for (const account of accounts) {
+      const ledger = await client.ledger.findUnique({
+        where: { id: account.ledgerId },
+        select: { currentBalance: true },
+      });
+      if (!ledger || ledger.currentBalance === account.currentBalance) continue;
+      await client.bankAccount.update({
+        where: { id: account.id },
+        data: { currentBalance: ledger.currentBalance },
+      });
+    }
+  }
+
+  /**
+   * Move collected/paid invoice money onto Cash or the selected bank account.
+   * Linked sales/purchases already post the full amount to unit Cash, so:
+   * - Cash + linked document: no extra entry (avoids double-counting)
+   * - Bank + linked document: transfer the paid amount from that Cash ledger to the bank
+   * - Standalone invoice: credit (customer) or debit (vendor) the selected account directly
+   * Customer receipt increases the account (credit). Vendor payment decreases it (debit).
+   */
+  async syncInvoiceAccountMovement(invoice, userId, tx = null) {
+    await this.deleteLedgerEntriesByReference('Invoice', invoice.id, tx);
+    if (invoice.isDeleted) {
+      await this.refreshBankAccountBalances(tx);
+      return;
+    }
+
+    const paid = Math.round((Number(invoice.paidAmount) || 0) * 100) / 100;
+    if (paid <= 0) {
+      await this.refreshBankAccountBalances(tx);
+      return;
+    }
+
+    const client = db(tx);
+    const linked = this.invoiceIsLinked(invoice);
+    const unit = this.invoiceBusinessUnit(invoice);
+    const isReceipt = invoice.invoiceType !== 'vendor';
+    const narration = `${isReceipt ? 'Payment received' : 'Payment made'} — ${invoice.invoiceNumber}${invoice.partyName ? ` · ${invoice.partyName}` : ''}`;
+    const createdBy = userId;
+
+    let targetLedger = null;
+    if (invoice.bankAccountId) {
+      const account = await client.bankAccount.findUnique({
+        where: { id: invoice.bankAccountId },
+        include: { ledger: true },
+      });
+      if (!account?.ledger) throw new AppError('Selected bank account was not found', 400);
+      targetLedger = account.ledger;
+    } else if (linked) {
+      await this.refreshBankAccountBalances(tx);
+      return;
+    } else {
+      targetLedger = await this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx);
+    }
+
+    const entryBase = {
+      narration,
+      referenceType: 'Invoice',
+      referenceId: invoice.id,
+      date: invoice.date,
+      createdBy,
+      businessUnit: unit,
+    };
+
+    if (invoice.bankAccountId && linked && unit) {
+      const cashLedger = await this.getOrCreateLedger('Cash Account', LEDGER_TYPES.CASH, null, unit, tx);
+      if (isReceipt) {
+        await this.createLedgerEntry({
+          ...entryBase,
+          ledgerId: cashLedger.id,
+          debit: paid,
+          credit: 0,
+          narration: `${narration} (moved from cash)`,
+          ledger: cashLedger,
+        }, tx);
+        await this.createLedgerEntry({
+          ...entryBase,
+          ledgerId: targetLedger.id,
+          debit: 0,
+          credit: paid,
+          ledger: targetLedger,
+        }, tx);
+      } else {
+        await this.createLedgerEntry({
+          ...entryBase,
+          ledgerId: cashLedger.id,
+          debit: 0,
+          credit: paid,
+          narration: `${narration} (moved from cash)`,
+          ledger: cashLedger,
+        }, tx);
+        await this.createLedgerEntry({
+          ...entryBase,
+          ledgerId: targetLedger.id,
+          debit: paid,
+          credit: 0,
+          ledger: targetLedger,
+        }, tx);
+      }
+    } else if (isReceipt) {
+      await this.createLedgerEntry({
+        ...entryBase,
+        ledgerId: targetLedger.id,
+        debit: 0,
+        credit: paid,
+        ledger: targetLedger,
+      }, tx);
+    } else {
+      await this.createLedgerEntry({
+        ...entryBase,
+        ledgerId: targetLedger.id,
+        debit: paid,
+        credit: 0,
+        ledger: targetLedger,
+      }, tx);
+    }
+
+    await this.refreshBankAccountBalances(tx);
+  }
+
   async getAllLedgers(filters = {}) {
     const where = { isActive: true };
     if (filters.type) where.type = filters.type;
-    if (filters.businessUnit) where.businessUnit = filters.businessUnit;
+    if (filters.businessUnit) {
+      where.OR = [
+        { businessUnit: filters.businessUnit },
+        { businessUnit: null, type: LEDGER_TYPES.BANK },
+      ];
+    }
 
     return prisma.ledger.findMany({
       where,
@@ -538,8 +684,13 @@ class AccountingService {
   }
 
   async getLedgerEntries(ledgerId, { startDate, endDate, businessUnit, skip = 0, limit = 50 } = {}) {
+    const ledger = await prisma.ledger.findUnique({
+      where: { id: ledgerId },
+      select: { businessUnit: true },
+    });
     const where = { ledgerId };
-    if (businessUnit) where.businessUnit = businessUnit;
+    // Company bank accounts are shared — don't hide entries behind a unit filter.
+    if (businessUnit && ledger?.businessUnit) where.businessUnit = businessUnit;
     if (startDate || endDate) {
       where.date = {};
       if (startDate) where.date.gte = new Date(startDate);
